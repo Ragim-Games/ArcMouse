@@ -1,165 +1,135 @@
-"""Safety process: global hotkey, Raw Input, UI heartbeat, worker Job Object."""
+"""Independent configurable hotkeys, cancellation, and process containment."""
 import multiprocessing as mp
 import queue
 import time
-
 from .engine import worker_main
 from .model import validate_settings
 
 
-def supervisor_main(pipe):
+def supervisor_main(pipe,held_state=None):
     from . import win32
     win32.dpi_aware()
-    ctx = mp.get_context("spawn")
-    pause_until = ctx.Value("d", 0.0, lock=False)
-    monitor = worker = job = events = cancel = None
-    pending = None
-    last_gui, last_heartbeat = time.monotonic(), 0
-    terminal_seen = False
-    worker_deadline = 0
+    ctx=mp.get_context("spawn")
+    held_state=held_state if held_state is not None else ctx.Value("I",0,lock=False)
+    monitor=worker=job=events=cancel=None
+    last_gui,last_heartbeat=time.monotonic(),0
+    deadline=0
+    terminal_event=None
+    epoch=0
+    active_backend="software"
+    configured=False
 
-    def send(event):
-        pipe.send(event)
+    def send(event): pipe.send(event)
 
-    def stop(reason="중지됨"):
-        nonlocal worker, job, events, pending
-        pending = None
+    def release():
+        if held_state.value and active_backend=="software":
+            win32.release_buttons(held_state.value)
+        held_state.value=0
+
+    def dispose():
+        nonlocal worker,job,events
         if worker:
             cancel.set()
-            worker.join(0.08)
+            if worker.pid is not None:worker.join(.08)
             if job:
-                job.close()  # Kills any worker descendants as well.
-                job = None
-            if worker.is_alive():
-                worker.terminate()
-            worker.join(0.5)
+                job.close()
+                job=None
+            if worker.pid is not None:
+                if worker.is_alive(): worker.terminate()
+                worker.join(.5)
             worker.close()
-            worker = None
+            worker=None
+        release()
         if events:
             events.close()
-            events = None
-        if monitor:
-            monitor.excluded_device = ""
-        send({"type": "stopped", "reason": reason})
+            events=None
+
+    def stop(reason):
+        nonlocal epoch
+        epoch+=1
+        dispose()
+        send({"type":"stopped","reason":reason})
 
     try:
-        monitor = win32.InputMonitor(pause_until)
-        send({"type": "ready"})
+        monitor=win32.HotkeyMonitor()
+        send({"type":"ready","emergency":monitor.emergency})
         while True:
             monitor.pump()
-            now = time.monotonic()
-            if monitor.kill_requested:
-                monitor.kill_requested = False
-                stop("비상 정지 · 입력 엔진 종료")
-            if monitor.input_error:
-                raise OSError(monitor.input_error)
-            if worker and now >= worker_deadline:
-                stop("30분 세션 한도 · 실행 엔진 종료")
-            if now - last_gui > 2.5:
-                stop("UI 응답 유실")
+            now=time.monotonic()
+            # Stop wins if both hotkeys arrive in one batch.
+            requests=monitor.requests[:]
+            monitor.requests.clear()
+            if "stop" in requests: stop("중단했습니다")
+            elif "start" in requests and not worker and configured:
+                send({"type":"hotkey_start","epoch":epoch})
+            if worker and now>=deadline: stop("30분 실행 한도에 도달했습니다")
+            if now-last_gui>2.5:
+                stop("앱 응답이 없어 중단했습니다")
                 break
             for _ in range(32):
-                if not pipe.poll():
-                    break
-                command = pipe.recv()
-                kind = command.get("type")
-                if kind == "heartbeat":
-                    last_gui = now
-                elif kind == "shutdown":
+                if not pipe.poll(): break
+                command=pipe.recv()
+                kind=command.get("type")
+                if kind=="heartbeat": last_gui=now
+                elif kind=="shutdown":
                     stop("앱 종료")
                     return
-                elif kind == "stop":
-                    stop("사용자가 중지했습니다.")
-                elif kind == "start":
-                    if worker or pending:
-                        send({"type": "error", "message": "이미 실행 중입니다."})
+                elif kind=="stop": stop("중단했습니다")
+                elif kind=="hotkeys":
+                    if worker:
+                        send({"type":"hotkey_error","message":"실행을 중단한 뒤 단축키를 변경하세요."})
                         continue
                     try:
-                        settings = validate_settings(command["settings"])
-                        command["settings"] = settings
-                        if settings["backend"] == "hardware" and not settings["dry_run"]:
-                            device = settings.get("device", "")
-                            if not device or device not in win32.mouse_devices():
-                                raise ValueError("연결된 MCU의 HID 마우스 장치를 선택하세요.")
-                            monitor.excluded_device = device
-                        pending = (now + 3, command)
-                        send({"type": "countdown", "seconds": 3})
+                        start,end=monitor.configure(command["start"],command["stop"])
+                        configured=True
+                        send({"type":"hotkeys","start":start,"stop":end})
                     except Exception as exc:
-                        send({"type": "error", "message": str(exc)})
-            if pending and now >= pending[0]:
-                command = pending[1]
-                pending = None
-                try:
-                    if command["target"] is None:
-                        command["target"] = win32.foreground_target(command["client_pid"])
-                except Exception as exc:
-                    monitor.excluded_device = ""
-                    send({"type": "error", "message": str(exc)})
-                    continue
-                cancel, gate = ctx.Event(), ctx.Event()
-                events = ctx.Queue(maxsize=128)
-                terminal_seen = False
-                worker = ctx.Process(target=worker_main,
-                    args=(command["settings"], command["target"],
-                          cancel, pause_until, gate, events), name="ArcMouse-Engine")
-                worker.start()
-                worker_deadline = now + 1800
-                try:
-                    job = win32.KillJob(worker.sentinel)
-                    gate.set()  # Worker cannot emit input until protected by Job Object.
-                except Exception:
-                    stop("실행 보호 초기화 실패")
-                    raise
-            if worker:
-                for _ in range(24):
+                        send({"type":"hotkey_error","message":str(exc)})
+                elif kind=="start":
+                    if worker: continue
+                    if command.get("epoch",epoch)!=epoch: continue
                     try:
-                        event = events.get_nowait()
-                    except queue.Empty:
-                        break
-                    terminal_seen |= event["type"] in ("completed", "stopped", "error")
-                    send(event)
+                        if not configured: raise ValueError("시작·중단 단축키를 먼저 적용하세요.")
+                        settings=validate_settings(command["settings"])
+                        active_backend=settings["backend"]
+                        held_state.value=0
+                        cancel,gate=ctx.Event(),ctx.Event()
+                        events=ctx.Queue(maxsize=128)
+                        terminal_event=None
+                        worker=ctx.Process(target=worker_main,args=(settings,cancel,gate,events,held_state),name="ArcMouse-Clicker")
+                        worker.start()
+                        job=win32.KillJob(worker.sentinel)
+                        gate.set()
+                        deadline=now+1800
+                    except Exception as exc:
+                        dispose()
+                        send({"type":"error","message":str(exc)})
+            if worker:
+                for _ in range(128):
+                    try: event=events.get_nowait()
+                    except queue.Empty: break
+                    if event["type"] in ("completed","stopped","error"):terminal_event=event
+                    else:send(event)
                 if not worker.is_alive():
-                    # Feeder flushed before child exit; collect its final status first.
+                    # The child's queue feeder is flushed before it exits.
                     for _ in range(128):
-                        try:
-                            event = events.get_nowait()
-                        except queue.Empty:
-                            break
-                        terminal_seen |= event["type"] in ("completed", "stopped", "error")
-                        send(event)
-                    if not terminal_seen:
-                        send({"type": "error", "message": f"실행 엔진이 예기치 않게 종료되었습니다 ({worker.exitcode})."})
-                    if job:
-                        job.close()
-                        job = None
-                    worker.join()
-                    worker.close()
-                    worker = None
-                    events.close()
-                    events = None
-                    monitor.excluded_device = ""
-                    send({"type": "idle"})
-            if now - last_heartbeat > 0.3:
-                send({"type": "heartbeat"})
-                last_heartbeat = now
-            time.sleep(0.003)
-    except (EOFError, BrokenPipeError):
-        pass
+                        try: event=events.get_nowait()
+                        except queue.Empty: break
+                        if event["type"] in ("completed","stopped","error"):terminal_event=event
+                        else:send(event)
+                    dispose()
+                    send(terminal_event or {"type":"error","message":"클릭 엔진이 종료됐습니다."})
+                    send({"type":"idle"})
+            if now-last_heartbeat>.3:
+                send({"type":"heartbeat"})
+                last_heartbeat=now
+            time.sleep(.003)
+    except (EOFError,BrokenPipeError): pass
     except BaseException as exc:
-        try:
-            send({"type": "fatal", "message": str(exc)})
-        except (BrokenPipeError, EOFError):
-            pass
+        try: send({"type":"fatal","message":str(exc)})
+        except (EOFError,BrokenPipeError): pass
     finally:
-        if cancel:
-            cancel.set()
-        if job:
-            job.close()
-        if worker:
-            worker.join(0.1)
-            if worker.is_alive():
-                worker.terminate()
-                worker.join(0.5)
-        if monitor:
-            monitor.close()
-        pipe.close()
+        try: dispose()
+        finally:
+            if monitor: monitor.close()
+            pipe.close()

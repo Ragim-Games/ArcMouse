@@ -1,388 +1,417 @@
-"""A single-screen auto clicker. No editor, graph, or scripting UI."""
+"""Simple cursor clicking plus an optional ordered point list."""
 import multiprocessing as mp
-import os
 import time
 import tkinter as tk
-from tkinter import ttk
-
-from . import __version__, win32
-from .design import BG, WHITE, INK, MUTED, LINE, GREEN, Button, Surface, Toggle, rounded
-from .model import DEFAULTS, validate_settings
+from tkinter import ttk, filedialog
+from . import __version__,win32
+from .design import BG,WHITE,INK,MUTED,LINE,GREEN,Button,Surface,Toggle
+from .model import DEFAULTS,MAX_ACTIONS,action,hotkey_pair,validate_settings,save_profile,load_profile
+from .overlay import PointPicker,Markers
 from .supervisor import supervisor_main
 
-AUTO_TARGET = "시작할 때 활성화된 창"
-BUTTONS = {"왼쪽 버튼": "left", "오른쪽 버튼": "right", "가운데 버튼": "middle"}
+BUTTONS={"왼쪽":"left","오른쪽":"right","가운데":"middle"}
+NAMES={"click":"클릭","hold":"홀드","slide":"슬라이드"}
 
 
 class AutoClicker:
-    def __init__(self, root, *, start_services=True):
-        self.root = root
-        self.services_started = start_services
-        self.busy, self.ready, self.capturing = False, False, False
-        self.targets, self.inputs = [], []
-        self.extra_dialog = None
-        self.target_text = tk.StringVar(value=AUTO_TARGET)
-        self.interval = tk.StringVar(value="100")
-        self.button_name = tk.StringVar(value="왼쪽 버튼")
-        self.repeat_mode = tk.StringVar(value="중지할 때까지")
-        self.count = tk.StringVar(value="100")
-        self.fixed = tk.BooleanVar(value=False)
-        self.x, self.y = tk.StringVar(value="0"), tk.StringVar(value="0")
-        self.state = tk.StringVar(value="안전 감시 준비 중…")
-        self.clicks = tk.StringVar(value="0회")
-        self.extra = dict(DEFAULTS)
-        self.last_supervisor = time.monotonic()
-        self.last_heartbeat = 0
-        self.countdown_until = 0
+    def __init__(self,root,*,start_services=True):
+        self.root,self.services_started=root,start_services
+        self.busy,self.ready,self.picking=False,False,False
+        self.mode="cursor"
+        self.actions=[]
+        self.selected=None
+        self.inputs=[]
+        self.registered=None
+        self.extra={"backend":"software","port":"COM3","dry_run":False}
+        self.interval=tk.StringVar(value="100")
+        self.button_name=tk.StringVar(value="왼쪽")
+        self.repeat_mode=tk.StringVar(value="중단할 때까지")
+        self.count=tk.StringVar(value="1")
+        self.start_key=tk.StringVar(value="F6")
+        self.stop_key=tk.StringVar(value="F7")
+        self.state=tk.StringVar(value="단축키 준비 중…")
+        self.stats=tk.StringVar(value="0회")
+        self.key_status=tk.StringVar(value="F6 시작 · F7 중단")
+        self.wait_value=tk.StringVar(value="100")
+        self.duration_value=tk.StringVar(value="500")
+        self.point_button=tk.StringVar(value="왼쪽")
+        self.show_markers=tk.BooleanVar(value=False)
+        self.extra_dialog=None
+        self.dialog_open=False
+        self.minimized_for_run=False
+        self.last_supervisor=time.monotonic()
+        self.last_heartbeat=0
         root.title(f"ArcMouse {__version__}")
         root.configure(bg=BG)
-        root.geometry("600x680")
-        root.minsize(570, 670)
+        root.geometry("650x560")
+        root.minsize(620,550)
         self.style()
         self.layout()
-        self.refresh_targets()
+        self.markers=Markers(root,self.marker_changed)
+        ctx=mp.get_context("spawn")
+        self.held=ctx.Value("I",0,lock=False)
         if start_services:
-            ctx = mp.get_context("spawn")
-            self.pipe, child = ctx.Pipe()
-            self.supervisor = ctx.Process(target=supervisor_main, args=(child,), name="ArcMouse-Safety")
+            self.pipe,child=ctx.Pipe()
+            self.supervisor=ctx.Process(target=supervisor_main,args=(child,self.held),name="ArcMouse-Hotkeys")
             self.supervisor.start()
             child.close()
-            root.after(40, self.poll)
+            root.after(40,self.poll)
         else:
-            self.state.set("미리보기 · 실제 입력 꺼짐")
+            self.state.set("미리보기 · 입력 엔진 꺼짐")
             self.start_button.configure(state="disabled")
-        root.protocol("WM_DELETE_WINDOW", self.close)
+        root.protocol("WM_DELETE_WINDOW",self.close)
 
     def style(self):
-        self.root.option_add("*Font", ("Malgun Gothic", 10))
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TEntry", fieldbackground=WHITE, foreground=INK, padding=8,
-                        bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, insertcolor=INK)
-        style.configure("TCombobox", fieldbackground=WHITE, foreground=INK, background=WHITE,
-                        padding=8, bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, arrowcolor=MUTED)
-        style.map("TCombobox", fieldbackground=[("readonly", WHITE), ("disabled", BG)],
-                  foreground=[("readonly", INK), ("disabled", MUTED)])
-        style.map("TEntry", fieldbackground=[("disabled", BG)], foreground=[("disabled", MUTED)])
-        self.root.option_add("*TCombobox*Listbox.background", WHITE)
-        self.root.option_add("*TCombobox*Listbox.foreground", INK)
+        self.root.option_add("*Font",("Malgun Gothic",9))
+        st=ttk.Style();st.theme_use("clam")
+        for name in ("TEntry","TCombobox"):
+            st.configure(name,fieldbackground=WHITE,foreground=INK,background=WHITE,padding=7,
+                         bordercolor=LINE,lightcolor=LINE,darkcolor=LINE,arrowcolor=MUTED,insertcolor=INK)
+            st.map(name,fieldbackground=[("readonly",WHITE),("disabled",BG)],foreground=[("readonly",INK),("disabled",MUTED)])
+        st.configure("Treeview",background=WHITE,fieldbackground=WHITE,foreground=INK,rowheight=33,borderwidth=0,font=("Malgun Gothic",9))
+        st.configure("Treeview.Heading",background=BG,foreground=MUTED,relief="flat",font=("Malgun Gothic",8))
+        st.map("Treeview",background=[("selected","#e7f6f0")],foreground=[("selected",GREEN)])
+        self.root.option_add("*TCombobox*Listbox.background",WHITE)
+        self.root.option_add("*TCombobox*Listbox.foreground",INK)
 
-    def label(self, parent, text="", size=10, color=INK, bold=False, **kw):
-        return tk.Label(parent, text=text, bg=parent.cget("bg"), fg=color, bd=0,
-                        font=("Malgun Gothic", size, "bold" if bold else "normal"), **kw)
+    def label(self,parent,text="",size=9,color=INK,bold=False,**kw):
+        return tk.Label(parent,text=text,bg=parent.cget("bg"),fg=color,bd=0,
+                        font=("Malgun Gothic",size,"bold" if bold else "normal"),**kw)
 
-    def entry(self, parent, variable, width=10):
-        widget = ttk.Entry(parent, textvariable=variable, width=width)
-        self.inputs.append((widget, "normal"))
-        return widget
+    def entry(self,parent,var,width=10):
+        w=ttk.Entry(parent,textvariable=var,width=width);self.inputs.append((w,"normal"));return w
 
-    def combo(self, parent, variable, values, width=15):
-        widget = ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=width)
-        self.inputs.append((widget, "readonly"))
-        return widget
+    def combo(self,parent,var,values,width=12,editable=False):
+        state="normal" if editable else "readonly"
+        w=ttk.Combobox(parent,textvariable=var,values=values,width=width,state=state)
+        self.inputs.append((w,state));return w
 
     def layout(self):
-        header = tk.Frame(self.root, bg=WHITE, padx=24, pady=10)
-        header.pack(fill="x")
-        logo = tk.Canvas(header, width=27, height=28, bg=WHITE, highlightthickness=0)
-        logo.pack(side="left", padx=(0,8))
-        logo.create_line(3,16,10,23,22,7,fill="#42baa0",width=4,capstyle="round",joinstyle="round")
-        logo.create_line(3,7,10,14,15,7,fill="#92d8cb",width=4,capstyle="round",joinstyle="round")
+        header=tk.Frame(self.root,bg=WHITE,padx=20,pady=10);header.pack(fill="x")
+        self.label(header,"◈",23,GREEN,True).pack(side="left",padx=(0,8))
         self.label(header,"ArcMouse",18,bold=True).pack(side="left")
-        self.extra_button = Button(header,"추가 설정",self.settings,variant="quiet")
-        self.extra_button.pack(side="right")
+        self.settings_button=Button(header,"설정",self.settings,variant="quiet",width=50)
+        self.settings_button.pack(side="right")
+        self.save_button=Button(header,"저장",self.save,variant="quiet",width=50);self.save_button.pack(side="right")
+        self.open_button=Button(header,"열기",self.open,variant="quiet",width=50);self.open_button.pack(side="right")
         tk.Frame(self.root,bg=LINE,height=1).pack(fill="x")
+        content=tk.Frame(self.root,bg=BG,padx=20,pady=14);content.pack(fill="both",expand=True)
+        tabs=tk.Frame(content,bg=BG);tabs.pack(fill="x",pady=(0,12))
+        self.cursor_tab=Button(tabs,"현재 커서",lambda:self.switch_mode("cursor"),variant="selected",width=110)
+        self.cursor_tab.pack(side="left",padx=(0,6))
+        self.points_tab=Button(tabs,"지점 순서",lambda:self.switch_mode("points"),width=110)
+        self.points_tab.pack(side="left")
+        self.label(tabs,"대상 창 없이 바로 실행",8,MUTED).pack(side="right",padx=2)
 
-        content = tk.Frame(self.root,bg=BG,padx=24,pady=14)
-        content.pack(fill="both",expand=True)
-        self.label(content,"간단하게, 자동 클릭.",21,bold=True).pack(anchor="w")
-        self.label(content,"간격을 정하고 시작을 누르세요.",9,MUTED).pack(anchor="w",pady=(5,12))
+        self.simple_card=Surface(content,height=106,padding=16);self.simple_card.pack(fill="x",pady=(0,10))
+        row=self.simple_card.body
+        row.columnconfigure(0,weight=1,uniform="simple");row.columnconfigure(1,weight=1,uniform="simple")
+        for col,title in enumerate(("클릭 간격 (ms)","마우스 버튼")):
+            box=tk.Frame(row,bg=WHITE);box.grid(row=0,column=col,sticky="ew",padx=(0,14) if col==0 else 0)
+            self.label(box,title,bold=True).pack(anchor="w",pady=(0,8))
+            if col==0:self.entry(box,self.interval).pack(fill="x")
+            else:self.combo(box,self.button_name,tuple(BUTTONS)).pack(fill="x")
 
-        card = Surface(content,height=235,padding=18)
-        card.pack(fill="x")
-        form = card.body
-        self.label(form,"대상 창",9,bold=True).pack(anchor="w",pady=(0,6))
-        target_row = tk.Frame(form,bg=WHITE)
-        target_row.pack(fill="x",pady=(0,13))
-        self.refresh_button = Button(target_row,"↻",self.refresh_targets,width=36,height=36)
-        self.refresh_button.pack(side="right",padx=(8,0))
-        self.target_combo = self.combo(target_row,self.target_text,(),width=30)
-        self.target_combo.pack(fill="x",expand=True)
+        self.points_card=Surface(content,height=280,padding=12)
+        panel=self.points_card.body
+        toolbar=tk.Frame(panel,bg=WHITE);toolbar.pack(fill="x",pady=(0,10))
+        self.point_tools=[]
+        for kind in ("click","hold","slide"):
+            w=Button(toolbar,"＋ "+NAMES[kind],lambda k=kind:self.pick(k),height=32)
+            w.pack(side="left",padx=(0,5));self.point_tools.append(w)
+        self.marker_toggle=Toggle(toolbar,self.show_markers,text="번호 표시")
+        self.marker_toggle.pack(side="right")
+        self.show_markers.trace_add("write",lambda *_:self.update_markers())
+        editor=tk.Frame(panel,bg=WHITE,width=205);editor.pack(side="right",fill="y",padx=(14,0));editor.pack_propagate(False)
+        self.point_title=self.label(editor,"지점을 추가하세요",11,bold=True);self.point_title.pack(anchor="w",pady=(0,8))
+        self.label(editor,"동작 후 대기 (ms)",8,MUTED).pack(anchor="w",pady=(0,4))
+        self.entry(editor,self.wait_value).pack(fill="x")
+        self.duration_label=self.label(editor,"홀드 / 슬라이드 시간 (ms)",8,MUTED)
+        self.duration_label.pack(anchor="w",pady=(8,4))
+        self.duration_entry=self.entry(editor,self.duration_value);self.duration_entry.pack(fill="x")
+        row=tk.Frame(editor,bg=WHITE);row.pack(fill="x",pady=(9,0))
+        self.combo(row,self.point_button,tuple(BUTTONS),width=7).pack(side="left",fill="x",expand=True)
+        apply=Button(row,"적용",self.apply_point,variant="primary",width=56,height=32)
+        apply.pack(side="right",padx=(6,0));self.point_tools.append(apply)
+        listbox=tk.Frame(panel,bg=WHITE);listbox.pack(fill="both",expand=True)
+        self.tree=ttk.Treeview(listbox,columns=("type","wait","duration"),show="tree headings",height=4,selectmode="browse")
+        self.tree.heading("#0",text="순서");self.tree.column("#0",width=40,stretch=False)
+        self.tree.heading("type",text="동작");self.tree.column("type",width=100)
+        self.tree.heading("wait",text="후 대기");self.tree.column("wait",width=70,stretch=False)
+        self.tree.heading("duration",text="동작 시간");self.tree.column("duration",width=75,stretch=False)
+        scroll=ttk.Scrollbar(listbox,orient="vertical",command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set);scroll.pack(side="right",fill="y");self.tree.pack(fill="both",expand=True)
+        self.tree.bind("<<TreeviewSelect>>",self.select_point)
+        controls=tk.Frame(listbox,bg=WHITE);controls.pack(fill="x",pady=(8,0))
+        for title,command in (("↑",lambda:self.reorder(-1)),("↓",lambda:self.reorder(1)),("위치 다시 찍기",self.repick),("삭제",self.delete_point)):
+            w=Button(controls,title,command,height=28);w.pack(side="left",padx=(0,5));self.point_tools.append(w)
 
-        row = tk.Frame(form,bg=WHITE)
-        row.pack(fill="x",pady=(0,14))
-        for col in range(2): row.columnconfigure(col,weight=1,uniform="main")
-        interval_box = tk.Frame(row,bg=WHITE)
-        interval_box.grid(row=0,column=0,sticky="ew",padx=(0,18))
-        self.label(interval_box,"클릭 간격",9,bold=True).pack(anchor="w",pady=(0,6))
-        interval_row = tk.Frame(interval_box,bg=WHITE)
-        interval_row.pack(fill="x")
-        self.label(interval_row,"ms",9,MUTED).pack(side="right",padx=(8,0))
-        self.entry(interval_row,self.interval).pack(fill="x",expand=True)
-        button_box = tk.Frame(row,bg=WHITE)
-        button_box.grid(row=0,column=1,sticky="ew")
-        self.label(button_box,"마우스 버튼",9,bold=True).pack(anchor="w",pady=(0,6))
-        self.combo(button_box,self.button_name,tuple(BUTTONS)).pack(fill="x")
+        self.repeat_row=tk.Frame(content,bg=BG);self.repeat_row.pack(fill="x",pady=(0,12))
+        self.repeat_label=self.label(self.repeat_row,"반복",bold=True);self.repeat_label.pack(side="left",padx=(0,12))
+        self.repeat_combo=self.combo(self.repeat_row,self.repeat_mode,("중단할 때까지","횟수 지정"),width=14)
+        self.repeat_combo.pack(side="left",fill="x",expand=True)
+        self.repeat_combo.bind("<<ComboboxSelected>>",lambda _:self.update_count())
+        self.count_entry=self.entry(self.repeat_row,self.count,width=7);self.count_entry.pack(side="left",padx=(10,6))
+        self.label(self.repeat_row,"회").pack(side="left");self.update_count()
 
-        row = tk.Frame(form,bg=WHITE)
-        row.pack(fill="x")
-        self.label(row,"반복",9,bold=True).pack(side="left",padx=(0,18))
-        mode = self.combo(row,self.repeat_mode,("중지할 때까지","횟수 지정"),width=15)
-        mode.pack(side="left",fill="x",expand=True)
-        mode.bind("<<ComboboxSelected>>",lambda _:self.update_count())
-        self.count_entry = self.entry(row,self.count,width=6)
-        self.count_entry.pack(side="left",padx=(10,6))
-        self.label(row,"회",9,MUTED).pack(side="left")
-        self.update_count()
+        keys=Surface(content,height=108,padding=12);keys.pack(fill="x",pady=(0,10))
+        row=tk.Frame(keys.body,bg=WHITE);row.pack(fill="x")
+        presets=tuple(f"F{i}" for i in range(1,12))+("Ctrl+Alt+S","Ctrl+Alt+D")
+        self.label(row,"시작",bold=True).pack(side="left",padx=(0,7))
+        self.combo(row,self.start_key,presets,width=11,editable=True).pack(side="left",fill="x",expand=True)
+        self.label(row,"중단",bold=True).pack(side="left",padx=(14,7))
+        self.combo(row,self.stop_key,presets,width=11,editable=True).pack(side="left",fill="x",expand=True)
+        self.key_button=Button(row,"적용",self.apply_hotkeys,width=56);self.key_button.pack(side="left",padx=(10,0))
+        self.label(keys.body,textvariable=self.key_status,size=8,color=MUTED,anchor="w").pack(fill="x",pady=(10,0))
+        status=tk.Frame(content,bg=BG);status.pack(fill="x",pady=(0,10))
+        self.label(status,textvariable=self.state,size=9,color=MUTED,wraplength=510,justify="left").pack(side="left",fill="x",expand=True)
+        self.label(status,textvariable=self.stats,size=13,color=GREEN,bold=True).pack(side="right")
+        row=tk.Frame(content,bg=BG);row.pack(fill="x")
+        self.start_button=Button(row,"▶ 시작",self.run,variant="primary",height=44);self.start_button.pack(side="left",fill="x",expand=True,padx=(0,10))
+        Button(row,"■ 중단",self.stop,variant="danger",width=120,height=44).pack(side="right")
+        self.emergency_note=self.label(content,"비상 정지  Ctrl + Alt + Shift + K",8,GREEN)
+        self.emergency_note.pack(pady=(10,0))
 
-        self.location_card = Surface(content,height=65,padding=14)
-        self.location_card.pack(fill="x",pady=(12,0))
-        location = self.location_card.body
-        row = tk.Frame(location,bg=WHITE)
-        row.pack(fill="x")
-        self.fixed_toggle = Toggle(row,self.fixed,text="위치 지정")
-        self.fixed_toggle.pack(side="left")
-        self.label(row,"꺼두면 현재 커서 위치를 클릭합니다.",8,MUTED).pack(side="right",pady=8)
-        self.position_fields = tk.Frame(location,bg=WHITE)
-        self.label(self.position_fields,"X",9,MUTED).pack(side="left",padx=(0,5))
-        self.entry(self.position_fields,self.x,width=7).pack(side="left")
-        self.label(self.position_fields,"Y",9,MUTED).pack(side="left",padx=(12,5))
-        self.entry(self.position_fields,self.y,width=7).pack(side="left")
-        self.capture_button = Button(self.position_fields,"위치 가져오기",self.capture,width=128)
-        self.capture_button.pack(side="right")
-        self.fixed.trace_add("write",lambda *_:self.update_position())
-
-        status = tk.Frame(content,bg=BG)
-        status.pack(fill="x",pady=(12,10))
-        self.status_label = self.label(status,textvariable=self.state,size=9,color=MUTED,anchor="w",justify="left",wraplength=400)
-        self.status_label.pack(side="left",fill="x",expand=True)
-        self.label(status,textvariable=self.clicks,size=16,bold=True,color=GREEN).pack(side="right",padx=(10,0))
-        actions = tk.Frame(content,bg=BG)
-        actions.pack(fill="x")
-        self.start_button = Button(actions,"▶  클릭 시작",self.run,variant="primary",height=46)
-        self.start_button.pack(side="left",fill="x",expand=True,padx=(0,10))
-        self.stop_button = Button(actions,"■  중지",self.stop,variant="danger",width=112,height=46)
-        self.stop_button.pack(side="right")
-        self.label(content,"3초 안에 클릭할 창으로 전환하세요. 연속 실행은 최대 30분입니다.",8,MUTED).pack(pady=(10,0))
-        self.label(content,"비상 정지  F12  /  Ctrl + Alt + Shift + K",9,GREEN,bold=True).pack(pady=(7,0))
+    def switch_mode(self,mode):
+        if self.busy or self.picking:return
+        if not self.apply_point(silent=True):return
+        self.mode=mode
+        self.cursor_tab.variant="selected" if mode=="cursor" else "normal";self.cursor_tab.redraw()
+        self.points_tab.variant="selected" if mode=="points" else "normal";self.points_tab.redraw()
+        if mode=="points":
+            self.root.minsize(820,720)
+            self.simple_card.pack_forget()
+            self.points_card.pack(fill="x",pady=(0,10),before=self.repeat_row)
+            self.root.geometry("870x720")
+            self.repeat_label.configure(text="전체 순서 반복")
+        else:
+            self.root.minsize(620,550)
+            self.points_card.pack_forget()
+            self.simple_card.pack(fill="x",pady=(0,10),before=self.repeat_row)
+            self.root.geometry("650x560")
+            self.repeat_label.configure(text="반복")
+        self.update_markers()
 
     def update_count(self):
         self.count_entry.configure(state="normal" if not self.busy and self.repeat_mode.get()=="횟수 지정" else "disabled")
 
-    def update_position(self):
-        if self.fixed.get():
-            self.location_card.configure(height=111)
-            self.position_fields.pack(fill="x",pady=(9,0))
-            if self.root.winfo_height()<700: self.root.geometry("600x710")
-        else:
-            self.position_fields.pack_forget()
-            self.location_card.configure(height=65)
+    def update_markers(self):
+        if not hasattr(self,"markers"):return
+        if self.show_markers.get() and self.mode=="points" and not self.busy and not self.picking:self.markers.show(self.actions)
+        else:self.markers.hide()
 
-    def refresh_targets(self):
-        if self.busy: return
-        self.targets = win32.windows()
-        self.target_combo["values"] = [AUTO_TARGET]+[f"{t['title'][:48]} · {t['pid']}" for t in self.targets]
-        self.target_text.set(AUTO_TARGET)
+    def marker_changed(self,index,endpoint,x,y):
+        if self.busy:return
+        if endpoint:self.actions[index].update(end_x=x,end_y=y)
+        else:self.actions[index].update(x=x,y=y)
+        self.refresh_list(index)
 
-    def selected_target(self):
-        index = self.target_combo.current()
-        if index==0: return None
-        if index<1 or index>len(self.targets): raise ValueError("대상 창을 선택하세요.")
-        return dict(self.targets[index-1])
+    def refresh_list(self,selected=None):
+        self.tree.delete(*self.tree.get_children())
+        for i,item in enumerate(self.actions):
+            duration="—" if item["type"]=="click" else f"{item['duration_ms']:g} ms"
+            self.tree.insert("","end",iid=str(i),text=str(i+1),values=(NAMES[item["type"]],f"{item['wait_ms']:g} ms",duration))
+        if selected is not None and 0<=selected<len(self.actions):
+            self.tree.selection_set(str(selected));self.tree.see(str(selected));self.selected=selected;self.populate_point()
+        else:self.selected=None;self.point_title.configure(text="지점을 선택하세요")
 
-    def collect_settings(self):
-        result = dict(self.extra)
-        result.update(interval_ms=self.interval.get(),button=BUTTONS[self.button_name.get()],
-                      count=self.count.get() if self.repeat_mode.get()=="횟수 지정" else 0,
-                      fixed_position=self.fixed.get(),x=self.x.get() if self.fixed.get() else 0,
-                      y=self.y.get() if self.fixed.get() else 0)
-        result=validate_settings(result)
-        if self.repeat_mode.get()=="횟수 지정" and result["count"]==0:
-            raise ValueError("반복 횟수는 1회 이상으로 입력하세요.")
+    def select_point(self,event=None):
+        if self.busy:return
+        chosen=self.tree.selection()
+        if chosen:
+            self.selected=int(chosen[0]);self.populate_point()
+
+    def populate_point(self):
+        if self.selected is None:return
+        item=self.actions[self.selected]
+        self.point_title.configure(text=f"{self.selected+1}. {NAMES[item['type']]}")
+        self.wait_value.set(f"{item['wait_ms']:g}");self.duration_value.set(f"{item['duration_ms']:g}")
+        self.point_button.set(next(k for k,v in BUTTONS.items() if v==item["button"]))
+        self.duration_entry.configure(state="disabled" if item["type"]=="click" else "normal")
+
+    def apply_point(self,silent=False):
+        if self.selected is None or self.busy:return True
+        try:
+            item=dict(self.actions[self.selected]);item.update(wait_ms=self.wait_value.get(),duration_ms=self.duration_value.get(),button=BUTTONS[self.point_button.get()])
+            self.actions[self.selected]=action(item)
+            self.refresh_list(self.selected)
+            if not silent:self.state.set("지점 시간을 적용했습니다")
+            return True
+        except Exception as exc:self.state.set(str(exc));return False
+
+    def pick(self,kind,index=None):
+        if self.busy or self.picking:return
+        if index is None and len(self.actions)>=MAX_ACTIONS:self.state.set(f"최대 {MAX_ACTIONS}개까지 추가할 수 있습니다");return
+        if not self.apply_point(silent=True):return
+        self.picking=True;self.markers.hide();self.start_button.configure(state="disabled")
+        def done(item):
+            self.picking=False
+            if index is None:self.actions.append(action(item));selected=len(self.actions)-1
+            else:
+                previous=self.actions[index]
+                item.update(wait_ms=previous["wait_ms"],duration_ms=previous["duration_ms"],button=previous["button"])
+                self.actions[index]=action(item);selected=index
+            self.refresh_list(selected);self.show_markers.set(True);self.update_markers();self.set_busy(False)
+            self.state.set("지점을 추가했습니다. 번호를 드래그해 위치를 바꿀 수 있습니다")
+        def cancel():self.picking=False;self.set_busy(False);self.update_markers();self.state.set("지점 선택 취소")
+        self.picker=PointPicker(self.root,kind,done,cancel)
+
+    def repick(self):
+        if self.selected is not None:self.pick(self.actions[self.selected]["type"],self.selected)
+
+    def reorder(self,delta):
+        if self.busy or self.selected is None or not self.apply_point(silent=True):return
+        index=self.selected;other=index+delta
+        if 0<=other<len(self.actions):
+            self.actions[index],self.actions[other]=self.actions[other],self.actions[index]
+            self.refresh_list(other);self.update_markers()
+
+    def delete_point(self):
+        if self.busy or self.selected is None:return
+        index=self.selected;del self.actions[index];self.selected=None
+        self.refresh_list(min(index,len(self.actions)-1) if self.actions else None);self.update_markers()
+
+    def collect_settings(self,require_actions=True):
+        if not self.apply_point(silent=True):raise ValueError("지점 시간을 확인하세요.")
+        result={**self.extra,"mode":self.mode,"interval_ms":self.interval.get(),"button":BUTTONS[self.button_name.get()],
+                "count":self.count.get() if self.repeat_mode.get()=="횟수 지정" else 0,"actions":self.actions,
+                "start_hotkey":self.start_key.get(),"stop_hotkey":self.stop_key.get()}
+        result=validate_settings(result,require_actions=require_actions)
+        if self.repeat_mode.get()=="횟수 지정" and result["count"]==0:raise ValueError("반복 횟수는 1 이상으로 입력하세요.")
         return result
+
+    def apply_hotkeys(self):
+        if self.busy or self.picking:return
+        try:
+            a,b=hotkey_pair(self.start_key.get(),self.stop_key.get())
+            if self.services_started:self.pipe.send({"type":"hotkeys","start":a[2],"stop":b[2]})
+            else:self.key_status.set(f"미리보기: {a[2]} 시작 · {b[2]} 중단")
+        except Exception as exc:self.state.set(str(exc))
 
     def set_busy(self,busy):
         self.busy=busy
-        for widget,normal in self.inputs: widget.configure(state="disabled" if busy else normal)
-        for widget in (self.fixed_toggle,self.extra_button,self.refresh_button,self.capture_button):
+        for widget,normal in self.inputs:widget.configure(state="disabled" if busy else normal)
+        for widget in (self.cursor_tab,self.points_tab,self.key_button,self.settings_button,self.save_button,self.open_button,self.marker_toggle,*self.point_tools):
             widget.configure(state="disabled" if busy else "normal")
         self.update_count()
-        self.start_button.configure(state="normal" if self.ready and not busy and not self.capturing else "disabled")
+        if not busy:self.populate_point()
+        self.start_button.configure(state="normal" if self.ready and not busy and not self.picking else "disabled")
 
-    def run(self):
-        if not self.services_started or not self.ready or self.busy or self.capturing: return
+    def run(self,epoch=None):
+        if not self.services_started or not self.ready or self.busy or self.picking or self.dialog_open or (self.extra_dialog and self.extra_dialog.winfo_exists()):return
         try:
             settings=self.collect_settings()
-            target=self.selected_target()
-            self.pipe.send({"type":"start","settings":settings,"target":target,"client_pid":os.getpid()})
-            self.clicks.set("0회")
-            self.active_dry=settings["dry_run"]
-            self.countdown_until=time.monotonic()+3
-            self.set_busy(True)
-            self.state.set("3초 후 시작 · 클릭할 창으로 전환하세요")
-        except Exception as exc:
-            self.state.set(str(exc))
+            if (settings["start_hotkey"],settings["stop_hotkey"])!=self.registered:raise ValueError("변경한 단축키를 먼저 적용하세요.")
+            self.markers.hide();self.root.update_idletasks()
+            if not settings["dry_run"] and self.root.state()!="iconic":
+                self.root.iconify();self.root.update_idletasks();self.minimized_for_run=True
+            message={"type":"start","settings":settings}
+            if epoch is not None:message["epoch"]=epoch
+            self.pipe.send(message);self.active_backend=settings["backend"]
+            self.set_busy(True);self.state.set("시작 중…");self.stats.set("0회")
+        except Exception as exc:self.state.set(str(exc))
 
     def stop(self):
-        if not self.services_started: return
-        try: self.pipe.send({"type":"stop"})
-        except (EOFError,BrokenPipeError,OSError): pass
+        if self.services_started:
+            try:self.pipe.send({"type":"stop"})
+            except (EOFError,BrokenPipeError,OSError):pass
 
-    def capture(self):
-        if self.busy or self.capturing: return
-        try: selected=self.selected_target()
-        except Exception as exc:
-            self.state.set(str(exc))
-            return
-        self.capturing=True
-        self.start_button.configure(state="disabled")
-        self.capture_button.configure(state="disabled")
-        self.state.set("3초 안에 클릭할 위치로 커서를 옮기세요")
-        def finish():
-            guard=None
-            try:
-                target=selected or win32.foreground_target(os.getpid())
-                guard=win32.TargetGuard(target)
-                point=win32.cursor()
-                guard.check_point(point)
-                ox,oy,w,h,scale=guard.geometry()
-                x,y=point[0]-ox,point[1]-oy
-                if self.extra["coordinates"]=="ratio": x,y=x/max(1,w-1),y/max(1,h-1)
-                else: x,y=x/scale,y/scale
-                self.x.set(f"{x:.4f}")
-                self.y.set(f"{y:.4f}")
-                # Pin the captured coordinates to their actual window.
-                match=next((i for i,t in enumerate(self.targets) if t["hwnd"]==target["hwnd"] and t["created"]==target["created"]),None)
-                if match is None:
-                    target.setdefault("title","선택한 창")
-                    self.targets.append(target)
-                    self.target_combo["values"]=[AUTO_TARGET]+[f"{t['title'][:48]} · {t['pid']}" for t in self.targets]
-                    match=len(self.targets)-1
-                self.target_combo.current(match+1)
-                self.state.set("위치를 가져왔습니다")
-            except Exception as exc: self.state.set(str(exc))
-            finally:
-                if guard: guard.close()
-                self.capturing=False
-                self.capture_button.configure(state="normal")
-                self.set_busy(False)
-        self.root.after(3000,finish)
+    def save(self):
+        if self.busy or self.picking:return
+        self.dialog_open=True
+        try:
+            settings=self.collect_settings(require_actions=False)
+            self.markers.hide()
+            path=filedialog.asksaveasfilename(parent=self.root,defaultextension=".json",initialfile="click-points.json",filetypes=[("ArcMouse 설정","*.json")])
+            if path:save_profile(path,settings);self.state.set("설정을 저장했습니다")
+        except Exception as exc:self.state.set(str(exc))
+        finally:self.dialog_open=False;self.update_markers()
+
+    def open(self):
+        if self.busy or self.picking:return
+        self.markers.hide()
+        self.dialog_open=True
+        try:
+            path=filedialog.askopenfilename(parent=self.root,filetypes=[("ArcMouse 설정","*.json")])
+            if not path:return
+            config=load_profile(path);self.selected=None
+            self.actions=config["actions"]
+            self.interval.set(str(config["interval_ms"]));self.button_name.set(next(k for k,v in BUTTONS.items() if v==config["button"]))
+            self.repeat_mode.set("횟수 지정" if config["count"] else "중단할 때까지");self.count.set(str(config["count"] or 1))
+            self.start_key.set(config["start_hotkey"]);self.stop_key.set(config["stop_hotkey"])
+            self.extra={k:config[k] for k in ("backend","port","dry_run")}
+            self.switch_mode(config["mode"]);self.refresh_list(0 if self.actions else None);self.update_count();self.apply_hotkeys()
+            self.state.set("설정을 불러왔습니다")
+        except Exception as exc:self.state.set(str(exc))
+        finally:self.dialog_open=False;self.update_markers()
 
     def settings(self):
-        if self.busy or self.capturing: return
-        if self.extra_dialog and self.extra_dialog.winfo_exists():
-            self.extra_dialog.lift()
-            return
-        dialog=tk.Toplevel(self.root)
-        self.extra_dialog=dialog
-        dialog.title("ArcMouse · 추가 설정")
-        dialog.configure(bg=WHITE,padx=24,pady=20)
-        dialog.geometry("520x610")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        self.label(dialog,"필요할 때만 설정하세요",16,bold=True).pack(anchor="w",pady=(0,16))
-        values={k:tk.StringVar(value=str(self.extra[k])) for k in ("jitter_ms","noise_px","duration_ms","port","device")}
-        fields=(("클릭 간격 변동 (ms)","jitter_ms"),("좌표 변동 (px)","noise_px"),("곡선 이동 시간 (ms)","duration_ms"))
-        for title,key in fields:
-            row=tk.Frame(dialog,bg=WHITE)
-            row.pack(fill="x",pady=5)
-            self.label(row,title,9).pack(side="left")
-            ttk.Entry(row,textvariable=values[key],width=12).pack(side="right")
-        self.label(dialog,"좌표 변동·곡선 이동은 위치 지정이 켜졌을 때 적용됩니다.",8,MUTED).pack(anchor="w",pady=(4,12))
-        coordinates=tk.StringVar(value="창 기준 좌표" if self.extra["coordinates"]=="dip" else "창 크기 비율 (0~1)")
-        ttk.Combobox(dialog,textvariable=coordinates,values=("창 기준 좌표","창 크기 비율 (0~1)"),state="readonly").pack(fill="x")
-        self.label(dialog,"좌표 기준을 바꾸면 X/Y를 다시 지정하세요.",8,MUTED).pack(anchor="w",pady=(5,16))
-        backend=tk.StringVar(value="일반 마우스 입력" if self.extra["backend"]=="software" else "USB 보드 (Leonardo / Pico)")
-        ttk.Combobox(dialog,textvariable=backend,values=("일반 마우스 입력","USB 보드 (Leonardo / Pico)"),state="readonly").pack(fill="x")
-        self.label(dialog,"USB 포트 / MCU 장치",9,MUTED).pack(anchor="w",pady=(12,5))
-        ttk.Entry(dialog,textvariable=values["port"]).pack(fill="x",pady=(0,6))
-        ttk.Combobox(dialog,textvariable=values["device"],values=win32.mouse_devices(),state="readonly").pack(fill="x")
-        self.label(dialog,"USB 보드를 쓸 때만 지정하세요. 실제 마우스를 제외하면\n그 마우스의 움직임으로 자동 일시정지가 작동하지 않습니다.",8,"#c64f5e",justify="left").pack(anchor="w",pady=(7,12))
-        dry=tk.BooleanVar(value=self.extra["dry_run"])
-        Toggle(dialog,dry,text="입력 없이 테스트").pack(anchor="w")
-        error=tk.StringVar()
-        self.label(dialog,textvariable=error,size=8,color="#c64f5e",wraplength=470).pack(fill="x",pady=5)
+        if self.busy or self.picking:return
+        if self.extra_dialog and self.extra_dialog.winfo_exists():self.extra_dialog.lift();return
+        dialog=tk.Toplevel(self.root);self.extra_dialog=dialog
+        dialog.title("ArcMouse 설정");dialog.configure(bg=WHITE,padx=24,pady=22);dialog.geometry("430x310");dialog.transient(self.root);dialog.grab_set()
+        self.label(dialog,"입력 방식",14,bold=True).pack(anchor="w",pady=(0,15))
+        backend=tk.StringVar(value="Windows 마우스" if self.extra["backend"]=="software" else "USB 보드")
+        ttk.Combobox(dialog,textvariable=backend,values=("Windows 마우스","USB 보드"),state="readonly").pack(fill="x")
+        port=tk.StringVar(value=self.extra["port"])
+        self.label(dialog,"USB 보드 포트 (사용할 때만)",8,MUTED).pack(anchor="w",pady=(12,5))
+        ttk.Entry(dialog,textvariable=port).pack(fill="x")
+        dry=tk.BooleanVar(value=self.extra["dry_run"]);Toggle(dialog,dry,text="입력 없이 테스트").pack(anchor="w",pady=(12,8))
         def apply():
-            try:
-                result={**self.extra,**{k:v.get() for k,v in values.items()},"dry_run":dry.get(),
-                        "coordinates":"dip" if coordinates.get()=="창 기준 좌표" else "ratio",
-                        "backend":"software" if backend.get()=="일반 마우스 입력" else "hardware"}
-                self.extra=validate_settings(result)
-                self.state.set("테스트 모드 · 실제 입력 꺼짐" if dry.get() else "대기 중")
-                dialog.destroy()
-            except Exception as exc: error.set(str(exc))
-        Button(dialog,"저장",apply,variant="primary",height=38).pack(fill="x",side="bottom",pady=(8,0))
+            self.extra={"backend":"software" if backend.get()=="Windows 마우스" else "hardware","port":port.get(),"dry_run":dry.get()}
+            self.state.set("테스트 모드 · 실제 입력 꺼짐" if dry.get() else "대기 중");dialog.destroy()
+        Button(dialog,"저장",apply,variant="primary").pack(fill="x",side="bottom")
 
     def poll(self):
         try:
             now=time.monotonic()
-            if now-self.last_heartbeat>=0.25:
-                self.pipe.send({"type":"heartbeat"})
-                self.last_heartbeat=now
+            if now-self.last_heartbeat>=.25:self.pipe.send({"type":"heartbeat"});self.last_heartbeat=now
             for _ in range(64):
-                if not self.pipe.poll(): break
-                event=self.pipe.recv()
-                kind=event["type"]
-                self.last_supervisor=now
+                if not self.pipe.poll():break
+                event=self.pipe.recv();kind=event["type"];self.last_supervisor=now
                 if kind=="ready":
-                    self.ready=True
-                    self.state.set("대기 중")
-                    self.set_busy(False)
-                elif kind=="countdown":
-                    self.countdown_until=now+3
-                elif kind=="running":
-                    self.countdown_until=0
-                    self.state.set("테스트 중 · 실제 입력 꺼짐" if self.active_dry else "클릭 중")
-                elif kind=="paused":
-                    self.countdown_until=0
-                    self.state.set("사용자 입력 감지 · 잠시 대기")
-                elif kind=="progress": self.clicks.set(f"{event['clicks']:,}회")
+                    if not event["emergency"]:self.emergency_note.configure(text="설정한 중단 단축키로 멈출 수 있습니다")
+                    self.apply_hotkeys()
+                elif kind=="hotkeys":
+                    self.registered=(event["start"],event["stop"]);self.start_key.set(event["start"]);self.stop_key.set(event["stop"])
+                    self.ready=True;self.key_status.set(f"적용됨: {event['start']} 시작 · {event['stop']} 중단");self.state.set("대기 중");self.set_busy(False)
+                elif kind=="hotkey_error":self.state.set(event["message"])
+                elif kind=="hotkey_start":self.run(epoch=event["epoch"])
+                elif kind=="running":self.state.set("테스트 중 · 실제 입력 꺼짐" if self.extra["dry_run"] else "실행 중")
+                elif kind=="progress":
+                    self.stats.set(f"{event['clicks']:,}회")
+                    if self.mode=="points" and event["index"]>0:self.state.set(f"{event['index']}번 지점 · {event['cycles']}회 반복 완료")
                 elif kind in ("completed","stopped","error","fatal"):
-                    self.countdown_until=0
-                    if kind=="fatal": self.ready=False
-                    self.state.set(event.get("message",event.get("reason","완료했습니다")))
-                    self.set_busy(False)
-                    if kind in ("error","fatal"): self.alert(self.state.get())
-                elif kind=="idle": self.set_busy(False)
-            if self.busy and self.countdown_until>now:
-                seconds=max(1,int(self.countdown_until-now+0.999))
-                self.state.set(f"{seconds}초 후 시작 · 클릭할 창으로 전환하세요")
+                    if kind=="fatal":self.ready=False
+                    self.state.set(event.get("message",event.get("reason","완료했습니다")));self.set_busy(False)
+                    if self.minimized_for_run:self.root.deiconify();self.minimized_for_run=False
+                elif kind=="idle":self.set_busy(False)
             if now-self.last_supervisor>1.5 or not self.supervisor.is_alive():
-                self.ready=False
-                self.set_busy(False)
-                self.state.set("안전 감시 연결이 끊겼습니다. 앱을 다시 실행하세요.")
-                if self.supervisor.is_alive(): self.supervisor.terminate()
-                return
-        except (EOFError,BrokenPipeError,OSError):
-            self.ready=False
-            self.set_busy(False)
-            self.state.set("안전 감시가 종료됐습니다. 앱을 다시 실행하세요.")
-            return
+                self.disconnect();return
+        except (EOFError,BrokenPipeError,OSError):self.disconnect();return
         self.root.after(40,self.poll)
 
-    def alert(self,message):
-        dialog=tk.Toplevel(self.root)
-        dialog.title("ArcMouse · 클릭 중단")
-        dialog.configure(bg=WHITE,padx=22,pady=20)
-        self.label(dialog,"클릭을 중단했습니다",14,"#c64f5e",True).pack(anchor="w")
-        self.label(dialog,message,9,wraplength=380,justify="left").pack(anchor="w",pady=16)
-        Button(dialog,"확인",dialog.destroy).pack(anchor="e")
+    def disconnect(self):
+        if self.held.value and getattr(self,"active_backend","software")=="software":
+            try:win32.release_buttons(self.held.value)
+            except OSError:pass
+            self.held.value=0
+        self.ready=False;self.set_busy(False);self.state.set("안전 감시가 종료됐습니다. 앱을 다시 실행하세요.")
+        if self.minimized_for_run:self.root.deiconify();self.minimized_for_run=False
+        if self.supervisor.is_alive():self.supervisor.terminate()
 
     def close(self):
+        self.markers.hide()
+        if self.picking:self.picker.abort()
         if self.services_started:
             try:
-                self.pipe.send({"type":"shutdown"})
-                self.supervisor.join(1)
-                if self.supervisor.is_alive():
-                    self.supervisor.terminate()
-                    self.supervisor.join(0.5)
-            except (EOFError,BrokenPipeError,OSError): pass
+                self.pipe.send({"type":"shutdown"});self.supervisor.join(1)
+                if self.supervisor.is_alive():self.supervisor.terminate();self.supervisor.join(.5)
+                if self.held.value and getattr(self,"active_backend","software")=="software":win32.release_buttons(self.held.value)
+            except (EOFError,BrokenPipeError,OSError):pass
             self.pipe.close()
         self.root.destroy()
 
 
 def main():
-    win32.dpi_aware()
-    root=tk.Tk()
-    AutoClicker(root)
-    root.mainloop()
+    win32.dpi_aware();root=tk.Tk();AutoClicker(root);root.mainloop()

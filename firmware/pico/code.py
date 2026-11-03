@@ -40,7 +40,7 @@ def execute(raw):
             release_all()
         elif command == "HELLO":
             release_all()
-            respond(seq, "ARCMOUSE/1")
+            respond(seq, "ARCMOUSE/2")
             return
         elif not kill.value:
             raise ValueError("KILL")
@@ -55,10 +55,14 @@ def execute(raw):
                 raise ValueError("MOVE")
             mouse.move(x=dx, y=dy)
             last_command = time.monotonic()
-        elif command == "CLICK" and len(words) == 3 and int(words[2]) in (1, 2, 4):
-            mouse.press(int(words[2]))
-            time.sleep(0.005)
-            mouse.release_all()
+        elif command in ("CLICK", "PRESS", "RELEASE") and len(words) == 3 and int(words[2]) in (1, 2, 4):
+            if command == "RELEASE":
+                mouse.release(int(words[2]))
+            else:
+                mouse.press(int(words[2]))
+                if command == "CLICK":
+                    time.sleep(0.005)
+                    mouse.release_all()
             last_command = time.monotonic()
         else:
             raise ValueError("COMMAND")

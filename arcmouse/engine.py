@@ -1,9 +1,8 @@
-"""One cancellable click loop, isolated from the UI and safety supervisor."""
-from __future__ import annotations
-
-import random
+"""Cursor clicking or a sequential list of point actions; no target window."""
 import time
-from .model import MIN_DELAY_MS, SettingsError, bezier, number, safe_interval, validate_settings
+from .model import MIN_DELAY_MS, SettingsError, number, validate_settings
+
+BUTTON_MASK={"left":1,"right":2,"middle":4}
 
 
 class Cancelled(Exception):
@@ -11,147 +10,122 @@ class Cancelled(Exception):
 
 
 class Engine:
-    def __init__(self, settings, guard, backend, cancel, pause_until, emit, max_seconds=1800):
-        self.settings = validate_settings(settings)
-        self.guard, self.backend = guard, backend
-        self.cancel, self.pause_until, self.emit = cancel, pause_until, emit
-        self.dry_run = self.settings["dry_run"]
-        self.coordinates = self.settings["coordinates"]
-        self.deadline = time.monotonic() + max_seconds
-        self.clicks = 0
-        self.last_emit = 0
-        self.rng = random.Random()
-        self.virtual_cursor = None
+    def __init__(self,settings,backend,cancel,emit,held_state,max_seconds=1800):
+        self.settings=validate_settings(settings)
+        self.backend,self.cancel,self.emit,self.held_state=backend,cancel,emit,held_state
+        self.deadline=time.monotonic()+max_seconds
+        self.clicks,self.cycles,self.index=0,0,0
+        self.last_emit=0
 
     def checkpoint(self):
-        if self.cancel.is_set():
-            raise Cancelled()
-        if time.monotonic() >= self.deadline:
-            raise SettingsError("세션 시간 한도에 도달했습니다.")
-        self.guard.check()
-        paused = False
-        while time.monotonic() < self.pause_until.value:
-            if not paused:
-                self.emit({"type": "paused", "reason": "사용자 입력 · 제어권 양보"})
-                paused = True
-            if self.cancel.wait(0.005):
-                raise Cancelled()
-            self.guard.check()
-            if time.monotonic() >= self.deadline:
-                raise SettingsError("세션 시간 한도에 도달했습니다.")
-        if paused:
-            self.emit({"type": "running"})
+        if self.cancel.is_set(): raise Cancelled()
+        if time.monotonic()>=self.deadline: raise SettingsError("30분 실행 한도에 도달했습니다.")
 
-    def wait(self, ms):
-        duration = max(MIN_DELAY_MS, number(ms, 0, 3_600_000)) / 1000
-        end = time.monotonic() + duration
+    def wait(self,ms):
+        end=time.monotonic()+max(MIN_DELAY_MS,number(ms,0,3600000))/1000
         while True:
             self.checkpoint()
-            remaining = end - time.monotonic()
-            if remaining <= 0:
-                return
-            if self.cancel.wait(min(remaining, 0.01)):
-                raise Cancelled()
+            if self.held_state.value and not self.settings["dry_run"]:
+                self.backend.keep_alive()
+            remaining=end-time.monotonic()
+            if remaining<=0: return
+            if self.cancel.wait(min(remaining,.01)): raise Cancelled()
 
-    def position(self):
-        if self.dry_run and self.virtual_cursor is not None:
-            return self.virtual_cursor
-        return self.guard.cursor()
+    def progress(self,force=False):
+        now=time.monotonic()
+        if force or now-self.last_emit>=.1:
+            self.emit({"type":"progress","clicks":self.clicks,"cycles":self.cycles,"index":self.index})
+            self.last_emit=now
 
-    def move(self, x, y, duration_ms=350, noise_px=0):
+    def move(self,x,y):
         self.checkpoint()
-        x, y = number(x), number(y)
-        duration_ms = number(duration_ms, 5, 60_000)
-        noise = number(noise_px, 0, 100)
-        ox, oy, width, height, scale = self.guard.geometry()
-        cx, cy = self.position()
-        # Curve is in client-relative units so moving a window won't leave stale endpoints.
-        sx = min(max(cx - ox, 0), width - 1)
-        sy = min(max(cy - oy, 0), height - 1)
-        if self.coordinates == "ratio":
-            start = (sx / max(1, width - 1), sy / max(1, height - 1))
-            nx, ny = max(1, width - 1), max(1, height - 1)
+        if not self.settings["dry_run"]: self.backend.move(x,y)
+
+    def click(self,button):
+        self.checkpoint()
+        if not self.settings["dry_run"]: self.backend.click(button)
+        self.clicks+=1
+
+    def execute(self,item):
+        self.move(item["x"],item["y"])
+        if item["type"]=="click":
+            self.click(item["button"])
         else:
-            start, nx, ny = (sx / scale, sy / scale), scale, scale
-        end = (x + max(-3*noise, min(3*noise, self.rng.gauss(0, noise))) / nx,
-               y + max(-3*noise, min(3*noise, self.rng.gauss(0, noise))) / ny)
-        self.guard.resolve(*end, self.coordinates)
-        steps = max(1, min(1200, int(duration_ms / 8)))
-        for px, py in bezier(start, end, steps, bend=self.rng.uniform(-0.18, 0.18)):
-            self.checkpoint()
-            point = self.guard.resolve(px, py, self.coordinates)
-            if self.dry_run:
-                self.virtual_cursor = point
-            else:
-                self.backend.move(*point)
-            self.wait(duration_ms / steps)
-
-    def click(self, button="left", interval_ms=150, jitter_ms=0):
-        if button not in ("left", "right", "middle"):
-            raise SettingsError("지원하지 않는 마우스 버튼")
-        # Enforce a minimum interval before every click, including the first.
-        self.wait(safe_interval(interval_ms, jitter_ms, self.rng))
-        self.checkpoint()
-        if self.settings["fixed_position"]:
-            self.move(self.settings["x"], self.settings["y"],
-                      self.settings["duration_ms"], self.settings["noise_px"])
-        self.checkpoint()
-        self.guard.check_point(self.position())
-        if not self.dry_run:
-            self.backend.click(button)
-        self.clicks += 1
+            button=item["button"]
+            if not self.settings["dry_run"]:
+                self.held_state.value=BUTTON_MASK[button]
+            try:
+                self.checkpoint()
+                if not self.settings["dry_run"]: self.backend.press(button)
+                if item["type"]=="hold":
+                    self.wait(item["duration_ms"])
+                else:
+                    duration=item["duration_ms"]
+                    start=time.monotonic()
+                    steps=max(1,min(750,int(duration/8)))
+                    for i in range(1,steps+1):
+                        self.checkpoint()
+                        # Smooth acceleration along the user-chosen swipe segment.
+                        t=i/steps
+                        t=t*t*(3-2*t)
+                        x=item["x"]+(item["end_x"]-item["x"])*t
+                        y=item["y"]+(item["end_y"]-item["y"])*t
+                        self.move(round(x),round(y))
+                        self.wait(max(0,(start+duration*i/steps/1000-time.monotonic())*1000))
+            finally:
+                if not self.settings["dry_run"]:
+                    self.backend.release(button)
+                    self.held_state.value=0
+            self.clicks+=1
         self.progress()
-
-    def progress(self, force=False):
-        now = time.monotonic()
-        if force or now - self.last_emit >= 0.1:
-            self.emit({"type": "progress", "clicks": self.clicks})
-            self.last_emit = now
+        self.wait(item["wait_ms"])
 
     def run(self):
-        settings = self.settings
-        while settings["count"] == 0 or self.clicks < settings["count"]:
-            self.checkpoint()
-            self.click(settings["button"], settings["interval_ms"], settings["jitter_ms"])
-        self.progress(True)
+        settings=self.settings
+        try:
+            while settings["count"]==0 or self.cycles<settings["count"]:
+                self.checkpoint()
+                if settings["mode"]=="cursor":
+                    self.wait(settings["interval_ms"])
+                    self.click(settings["button"])
+                else:
+                    for self.index,item in enumerate(settings["actions"],1):
+                        self.execute(item)
+                self.cycles+=1
+                self.progress()
+            self.progress(True)
+        finally:
+            if self.held_state.value and not settings["dry_run"]:
+                self.backend.release_all()
+                self.held_state.value=0
 
 
-
-def worker_main(settings, target, cancel, pause_until, gate, events):
+def worker_main(settings,cancel,gate,events,held_state):
     from . import win32
     win32.dpi_aware()
-    backend = guard = None
-
+    backend=None
     def emit(event):
-        try:
-            events.put_nowait(event)
-        except Exception:
-            pass  # Bounded logging must never block input cancellation.
-
+        try: events.put_nowait(event)
+        except Exception: pass
     try:
-        while not gate.wait(0.01):
-            if cancel.is_set():
-                raise Cancelled()
-        guard = win32.TargetGuard(target)
-        guard.cursor = win32.cursor
-        backend = win32.SoftwareMouse()
-        engine = Engine(settings, guard, backend, cancel, pause_until, emit)
-        if settings["backend"] == "hardware" and not settings["dry_run"]:
+        while not gate.wait(.01):
+            if cancel.is_set(): raise Cancelled()
+        backend=win32.SoftwareMouse()
+        engine=Engine(settings,backend,cancel,emit,held_state)
+        if settings["backend"]=="hardware" and not settings["dry_run"]:
             from .hardware import SerialMouse
-            backend = SerialMouse(settings["port"], engine.checkpoint, win32.cursor,
-                                  lambda: guard.check_point(win32.cursor()))
-            engine.backend = backend
-        emit({"type": "running"})
+            backend=SerialMouse(settings["port"],engine.checkpoint,win32.cursor,engine.checkpoint)
+            engine.backend=backend
+        if settings["mode"]=="points" and not settings["dry_run"]:
+            for item in settings["actions"]:
+                win32.check_screen_point(item["x"],item["y"])
+                if item["type"]=="slide": win32.check_screen_point(item["end_x"],item["end_y"])
+        emit({"type":"running"})
         engine.run()
-        emit({"type": "completed"})
-    except Cancelled:
-        emit({"type": "stopped"})
-    except BaseException as exc:
-        emit({"type": "error", "message": str(exc) or type(exc).__name__})
+        emit({"type":"completed"})
+    except Cancelled: emit({"type":"stopped"})
+    except BaseException as exc: emit({"type":"error","message":str(exc) or type(exc).__name__})
     finally:
-        if backend:
-            backend.close()
-        if guard:
-            guard.close()
+        if backend: backend.close()
         events.close()
         events.join_thread()

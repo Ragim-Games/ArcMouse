@@ -36,7 +36,7 @@ void execute(char *text) {
   long sequence;
   if (!integer(seqText, sequence) || sequence < 0 || !command) { releaseAll(); return; }
   if (!strcmp(command, "STOP")) { releaseAll(); reply(sequence, "OK"); return; }
-  if (!strcmp(command, "HELLO")) { releaseAll(); reply(sequence, "ARCMOUSE/1"); return; }
+  if (!strcmp(command, "HELLO")) { releaseAll(); reply(sequence, "ARCMOUSE/2"); return; }
   if (digitalRead(KILL_PIN) == LOW) { releaseAll(); reply(sequence, "ERR KILL"); return; }
   if (!strcmp(command, "ARM")) {
     armed = true;
@@ -57,15 +57,17 @@ void execute(char *text) {
       releaseAll(); reply(sequence, "ERR MOVE"); return;
     }
     Mouse.move((signed char)dx, (signed char)dy, 0);
-  } else if (!strcmp(command, "CLICK")) {
+  } else if (!strcmp(command, "CLICK") || !strcmp(command, "PRESS") || !strcmp(command, "RELEASE")) {
     long button;
     if (!integer(strtok(nullptr, " "), button) || strtok(nullptr, " ") ||
         (button != 1 && button != 2 && button != 4)) {
       releaseAll(); reply(sequence, "ERR CLICK"); return;
     }
-    Mouse.press(button);
-    delay(5);
-    Mouse.release(button);
+    if (!strcmp(command, "RELEASE")) Mouse.release(button);
+    else {
+      Mouse.press(button);
+      if (!strcmp(command, "CLICK")) { delay(5); Mouse.release(button); }
+    }
   } else {
     releaseAll(); reply(sequence, "ERR COMMAND"); return;
   }

@@ -47,30 +47,6 @@ class WNDCLASS(C.Structure):
                 ("lpszMenuName", W.LPCWSTR), ("lpszClassName", W.LPCWSTR)]
 
 
-class RAWDEVICE(C.Structure):
-    _fields_ = [("usagePage", W.USHORT), ("usage", W.USHORT),
-                ("flags", W.DWORD), ("target", W.HWND)]
-
-
-class RAWDEVLIST(C.Structure):
-    _fields_ = [("handle", W.HANDLE), ("kind", W.DWORD)]
-
-
-class RAWHEADER(C.Structure):
-    _fields_ = [("kind", W.DWORD), ("size", W.DWORD), ("device", W.HANDLE), ("param", W.WPARAM)]
-
-
-class RAWMOUSE(C.Structure):
-    _fields_ = [("flags", W.USHORT), ("buttons", W.ULONG), ("rawButtons", W.ULONG),
-                ("dx", W.LONG), ("dy", W.LONG), ("extra", W.ULONG)]
-
-
-class RAWKEYBOARD(C.Structure):
-    _fields_ = [("makeCode", W.USHORT), ("flags", W.USHORT), ("reserved", W.USHORT),
-                ("vkey", W.USHORT), ("message", W.UINT), ("extra", W.ULONG)]
-
-
-bind(user, "EnumWindows", W.BOOL, ENUMPROC, W.LPARAM)
 bind(user, "IsWindow", W.BOOL, W.HWND)
 bind(user, "IsWindowVisible", W.BOOL, W.HWND)
 bind(user, "IsIconic", W.BOOL, W.HWND)
@@ -97,10 +73,6 @@ bind(user, "DestroyWindow", W.BOOL, W.HWND)
 bind(user, "PeekMessageW", W.BOOL, C.POINTER(W.MSG), W.HWND, W.UINT, W.UINT, W.UINT)
 bind(user, "TranslateMessage", W.BOOL, C.POINTER(W.MSG))
 bind(user, "DispatchMessageW", LRESULT, C.POINTER(W.MSG))
-bind(user, "RegisterRawInputDevices", W.BOOL, C.POINTER(RAWDEVICE), W.UINT, W.UINT)
-bind(user, "GetRawInputData", W.UINT, W.HANDLE, W.UINT, W.LPVOID, C.POINTER(W.UINT), W.UINT)
-bind(user, "GetRawInputDeviceList", W.UINT, C.POINTER(RAWDEVLIST), C.POINTER(W.UINT), W.UINT)
-bind(user, "GetRawInputDeviceInfoW", W.UINT, W.HANDLE, W.UINT, W.LPVOID, C.POINTER(W.UINT))
 bind(kernel, "OpenProcess", W.HANDLE, W.DWORD, W.BOOL, W.DWORD)
 bind(kernel, "CloseHandle", W.BOOL, W.HANDLE)
 bind(kernel, "GetProcessTimes", W.BOOL, W.HANDLE, C.POINTER(W.FILETIME), C.POINTER(W.FILETIME),
@@ -116,121 +88,11 @@ def dpi_aware():
     user.SetProcessDpiAwarenessContext(W.HANDLE(-4))  # Per monitor v2, before creating any HWND.
 
 
-def creation_time(handle):
-    a, b, c, d = W.FILETIME(), W.FILETIME(), W.FILETIME(), W.FILETIME()
-    if not kernel.GetProcessTimes(handle, C.byref(a), C.byref(b), C.byref(c), C.byref(d)):
-        raise OSError("프로세스 생성 시각을 확인할 수 없습니다.")
-    return (a.dwHighDateTime << 32) | a.dwLowDateTime
-
-
-def identity(hwnd):
-    pid = W.DWORD()
-    user.GetWindowThreadProcessId(hwnd, C.byref(pid))
-    handle = kernel.OpenProcess(0x100000 | 0x1000, False, pid.value)
-    if not handle:
-        raise OSError("대상 프로세스를 열 수 없습니다.")
-    try:
-        return {"hwnd": int(hwnd), "pid": pid.value, "created": creation_time(handle)}
-    finally:
-        kernel.CloseHandle(handle)
-
-
-def windows():
-    found = []
-
-    @ENUMPROC
-    def callback(hwnd, _):
-        title = C.create_unicode_buffer(512)
-        user.GetWindowTextW(hwnd, title, len(title))
-        if user.IsWindowVisible(hwnd) and title.value and not desktop_window(hwnd):
-            try:
-                item = identity(hwnd)
-                if item["pid"] != os.getpid():
-                    item["title"] = title.value
-                    found.append(item)
-            except OSError:
-                pass
-        return True
-
-    user.EnumWindows(callback, 0)
-    return found
-
-
-def desktop_window(hwnd):
-    name = C.create_unicode_buffer(256)
-    user.GetClassNameW(hwnd, name, len(name))
-    return name.value in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
-
-
-def foreground_target(excluded_pid):
-    hwnd = user.GetForegroundWindow()
-    if not hwnd or desktop_window(hwnd):
-        raise OSError("바탕화면 대신 클릭할 프로그램 창을 선택하세요.")
-    target = identity(hwnd)
-    if target["pid"] == excluded_pid:
-        raise OSError("시작 후 3초 안에 클릭할 프로그램으로 전환하세요.")
-    return target
-
-
 def cursor():
     point = W.POINT()
     if not user.GetCursorPos(C.byref(point)):
         raise OSError("커서 위치를 읽을 수 없습니다.")
     return point.x, point.y
-
-
-class TargetGuard:
-    def __init__(self, target):
-        self.hwnd, self.pid = target["hwnd"], target["pid"]
-        self.handle = kernel.OpenProcess(0x100000 | 0x1000, False, self.pid)
-        if not self.handle:
-            raise OSError("대상 프로세스가 종료되었습니다.")
-        if creation_time(self.handle) != target["created"]:
-            self.close()
-            raise OSError("대상 프로세스 ID가 재사용되었습니다.")
-
-    def check(self, foreground=True):
-        pid = W.DWORD()
-        user.GetWindowThreadProcessId(self.hwnd, C.byref(pid))
-        if (not user.IsWindow(self.hwnd) or pid.value != self.pid or
-                kernel.WaitForSingleObject(self.handle, 0) != 258 or
-                user.IsIconic(self.hwnd) or not user.IsWindowVisible(self.hwnd)):
-            raise OSError("대상 창이 사라졌거나 최소화되었습니다. 입력을 중단했습니다.")
-        if foreground and user.GetForegroundWindow() != self.hwnd:
-            raise OSError("대상 창이 포커스를 잃었습니다. 입력을 중단했습니다.")
-
-    def geometry(self):
-        self.check()
-        rect, origin = W.RECT(), W.POINT()
-        if not user.GetClientRect(self.hwnd, C.byref(rect)) or not user.ClientToScreen(self.hwnd, C.byref(origin)):
-            raise OSError("대상 창 좌표를 읽을 수 없습니다.")
-        return origin.x, origin.y, rect.right, rect.bottom, (user.GetDpiForWindow(self.hwnd) or 96) / 96
-
-    def resolve(self, x, y, mode="dip"):
-        ox, oy, width, height, scale = self.geometry()
-        if mode == "dip":
-            px, py = round(x * scale), round(y * scale)
-        elif mode == "ratio":
-            px, py = round(x * (width - 1)), round(y * (height - 1))
-        else:
-            raise ValueError("알 수 없는 좌표 모드")
-        if not (0 <= px < width and 0 <= py < height):
-            raise OSError("좌표가 대상 창의 클라이언트 영역을 벗어났습니다.")
-        return ox + px, oy + py
-
-    def check_point(self, point):
-        ox, oy, width, height, _ = self.geometry()
-        x, y = point
-        if not (ox <= x < ox + width and oy <= y < oy + height):
-            raise OSError("커서가 대상 창 밖에 있어 클릭을 중단했습니다.")
-        hit = user.WindowFromPoint(W.POINT(int(x), int(y)))
-        if user.GetAncestor(hit, 2) != self.hwnd:
-            raise OSError("다른 창이 클릭 위치를 가리고 있어 중단했습니다.")
-
-    def close(self):
-        if self.handle:
-            kernel.CloseHandle(self.handle)
-            self.handle = None
 
 
 def mouse_input(flags, x=0, y=0):
@@ -264,108 +126,95 @@ class SoftwareMouse:
             user.SendInput(3,releases,C.sizeof(INPUT))
             raise
 
+    def press(self,button):
+        send_inputs(mouse_input({"left":2,"right":8,"middle":32}[button]))
+
+    def release(self,button):
+        send_inputs(mouse_input({"left":4,"right":16,"middle":64}[button]))
+
+    def release_all(self):
+        release_buttons(7)
+
+    def keep_alive(self):
+        pass
+
     def close(self):
         pass
 
 
-def device_name(handle):
-    size = W.UINT()
-    user.GetRawInputDeviceInfoW(handle, 0x20000007, None, C.byref(size))
-    if not size.value:
-        return ""
-    buf = C.create_unicode_buffer(size.value + 1)
-    if user.GetRawInputDeviceInfoW(handle, 0x20000007, buf, C.byref(size)) == 0xFFFFFFFF:
-        return ""
-    return buf.value
+def release_buttons(mask):
+    inputs=[mouse_input(flag) for bit,flag in ((1,4),(2,16),(4,64)) if mask&bit]
+    if inputs: send_inputs(*inputs)
 
 
-def mouse_devices():
-    count = W.UINT()
-    if user.GetRawInputDeviceList(None, C.byref(count), C.sizeof(RAWDEVLIST)) == 0xFFFFFFFF:
-        raise C.WinError(C.get_last_error())
-    array = (RAWDEVLIST * count.value)()
-    n = user.GetRawInputDeviceList(array, C.byref(count), C.sizeof(RAWDEVLIST))
-    if n == 0xFFFFFFFF:
-        raise C.WinError(C.get_last_error())
-    return [device_name(d.handle) for d in array[:n] if d.kind == 0]
+def screen_bounds():
+    return tuple(user.GetSystemMetrics(n) for n in (76,77,78,79))
 
 
-class InputMonitor:
-    """Physical input delivered to an independent process, including while UI hangs."""
-    def __init__(self, pause_until, threshold=3):
-        self.pause_until, self.threshold = pause_until, threshold
-        self.excluded_device = ""
-        self.kill_requested = False
-        self.input_error = None
-        self.distance, self.last_motion = 0, 0
-        self.names = {}
-        self.proc = WNDPROC(self._proc)
-        self.class_name = f"ArcMouseSafety{os.getpid()}"
-        wc = WNDCLASS(lpfnWndProc=self.proc, hInstance=kernel.GetModuleHandleW(None), lpszClassName=self.class_name)
-        if not user.RegisterClassW(C.byref(wc)):
-            raise C.WinError(C.get_last_error())
-        self.hwnd = user.CreateWindowExW(0, self.class_name, "", 0, 0, 0, 0, 0,
-                                          W.HWND(-3), None, wc.hInstance, None)
-        if not self.hwnd:
-            raise C.WinError(C.get_last_error())
-        devices = (RAWDEVICE * 2)(RAWDEVICE(1, 2, 0x2100, self.hwnd), RAWDEVICE(1, 6, 0x2100, self.hwnd))
-        if not user.RegisterRawInputDevices(devices, 2, C.sizeof(RAWDEVICE)):
-            raise C.WinError(C.get_last_error())
-        if not user.RegisterHotKey(self.hwnd, 1, 0x4000 | 1 | 2 | 4, ord("K")):
-            raise OSError("Ctrl+Alt+Shift+K를 등록할 수 없습니다. 다른 앱의 단축키 설정을 확인하세요.")
+def check_screen_point(x,y):
+    left,top,width,height=screen_bounds()
+    if not (left<=x<left+width and top<=y<top+height):
+        raise OSError("저장된 지점이 현재 화면 밖에 있습니다. 지점을 다시 지정하세요.")
 
-    def _proc(self, hwnd, msg, wp, lp):
+
+class HotkeyMonitor:
+    """Message-only HWND. Rebinding is transactional and does not watch the mouse."""
+    def __init__(self):
+        self.requests=[]
+        self.bindings={}
+        self.roles={1:"stop"}
+        self.next_id=10
+        self.proc=WNDPROC(self._proc)
+        self.class_name=f"ArcMouseHotkeys{os.getpid()}_{id(self)}"
+        wc=WNDCLASS(lpfnWndProc=self.proc,hInstance=kernel.GetModuleHandleW(None),lpszClassName=self.class_name)
+        if not user.RegisterClassW(C.byref(wc)): raise C.WinError(C.get_last_error())
+        self.hwnd=user.CreateWindowExW(0,self.class_name,"",0,0,0,0,0,W.HWND(-3),None,wc.hInstance,None)
+        if not self.hwnd: raise C.WinError(C.get_last_error())
+        self.emergency=bool(user.RegisterHotKey(self.hwnd,1,0x4000|1|2|4,ord("K")))
+
+    def configure(self,start,stop):
+        from .model import hotkey_pair
+        a,b=hotkey_pair(start,stop)
+        next_bindings={}
+        newly_registered=[]
         try:
-            if msg == 0x312:
-                self.kill_requested = True
-            elif msg == 0xFE:  # WM_INPUT_DEVICE_CHANGE
-                self.names.clear()
-                if wp == 2 and self.excluded_device and self.excluded_device not in mouse_devices():
-                    self.input_error = "선택한 MCU HID 장치 연결이 끊겼습니다."
-            elif msg == 0xFF:
-                size = W.UINT()
-                header_size = C.sizeof(RAWHEADER)
-                if user.GetRawInputData(lp, 0x10000003, None, C.byref(size), header_size) == 0xFFFFFFFF:
-                    raise OSError("Raw Input 크기 조회 실패")
-                buf = C.create_string_buffer(size.value)
-                if user.GetRawInputData(lp, 0x10000003, buf, C.byref(size), header_size) == 0xFFFFFFFF:
-                    raise OSError("Raw Input 읽기 실패")
-                header = RAWHEADER.from_buffer(buf)
-                now = time.monotonic()
-                if header.kind == 1:
-                    key = RAWKEYBOARD.from_buffer(buf, header_size)
-                    if key.vkey == 0x7B and not key.flags & 1:
-                        self.kill_requested = True  # F12 is supplementary, not RegisterHotKey.
-                    self.pause_until.value = now + 0.5
-                elif header.kind == 0:
-                    if header.device not in self.names:
-                        self.names[header.device] = device_name(header.device)
-                    name = self.names[header.device]
-                    if self.excluded_device and name == self.excluded_device:
-                        return user.DefWindowProcW(hwnd, msg, wp, lp)
-                    mouse = RAWMOUSE.from_buffer(buf, header_size)
-                    if now - self.last_motion > 0.15:
-                        self.distance = 0
-                    self.last_motion = now
-                    self.distance += abs(mouse.dx) + abs(mouse.dy)
-                    if mouse.buttons or self.distance >= self.threshold:
-                        self.pause_until.value = now + 0.5
-                        self.distance = 0
-        except Exception as exc:
-            self.input_error = str(exc)
-        return user.DefWindowProcW(hwnd, msg, wp, lp)
+            for flags,vk,name in (a,b):
+                key=(flags,vk)
+                if key in self.bindings:
+                    next_bindings[key]=self.bindings[key]
+                    continue
+                identifier=self.next_id
+                self.next_id+=1
+                if not user.RegisterHotKey(self.hwnd,identifier,flags|0x4000,vk):
+                    error=C.get_last_error()
+                    if error==1409:
+                        raise OSError(f"{name} 단축키는 다른 앱에서 사용 중입니다. 다른 키를 선택하세요.")
+                    raise OSError(f"{name} 단축키 등록 실패 (Windows 오류 {error}). 실행 환경의 입력 권한을 확인하세요.")
+                next_bindings[key]=identifier
+                newly_registered.append(identifier)
+        except Exception:
+            for identifier in newly_registered: user.UnregisterHotKey(self.hwnd,identifier)
+            raise
+        for key,identifier in self.bindings.items():
+            if key not in next_bindings: user.UnregisterHotKey(self.hwnd,identifier)
+        self.bindings=next_bindings
+        self.roles={1:"stop",next_bindings[a[:2]]:"start",next_bindings[b[:2]]:"stop"}
+        return a[2],b[2]
+
+    def _proc(self,hwnd,msg,wp,lp):
+        if msg==0x312 and wp in self.roles:
+            self.requests.append(self.roles[wp])
+        return user.DefWindowProcW(hwnd,msg,wp,lp)
 
     def pump(self):
-        msg = W.MSG()
-        # Bound work so a device flooding messages cannot starve the kill check.
+        msg=W.MSG()
         for _ in range(256):
-            if not user.PeekMessageW(C.byref(msg), None, 0, 0, 1):
-                break
+            if not user.PeekMessageW(C.byref(msg),None,0,0,1): break
             user.TranslateMessage(C.byref(msg))
             user.DispatchMessageW(C.byref(msg))
 
     def close(self):
-        user.UnregisterHotKey(self.hwnd, 1)
+        for identifier in (1,*self.bindings.values()): user.UnregisterHotKey(self.hwnd,identifier)
         user.DestroyWindow(self.hwnd)
 
 

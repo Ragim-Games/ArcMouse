@@ -14,37 +14,30 @@ def idle_child(ready):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows native boundary")
 class Win32Tests(unittest.TestCase):
-    def test_auto_target_captures_foreground_identity(self):
-        from arcmouse import win32
-        expected={"hwnd":42,"pid":200,"created":123}
-        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
-             patch.object(win32,"desktop_window",return_value=False), \
-             patch.object(win32,"identity",return_value=expected):
-            self.assertEqual(win32.foreground_target(100),expected)
-
-    def test_auto_target_rejects_own_app(self):
-        from arcmouse import win32
-        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
-             patch.object(win32,"desktop_window",return_value=False), \
-             patch.object(win32,"identity",return_value={"hwnd":42,"pid":100,"created":123}):
-            with self.assertRaisesRegex(OSError,"전환"):
-                win32.foreground_target(100)
-
-    def test_auto_target_rejects_desktop(self):
-        from arcmouse import win32
-        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
-             patch.object(win32,"desktop_window",return_value=True):
-            with self.assertRaisesRegex(OSError,"바탕화면"):
-                win32.foreground_target(100)
-
     def test_abi_sizes(self):
         from arcmouse import win32
         x64 = ctypes.sizeof(ctypes.c_void_p) == 8
         self.assertEqual(ctypes.sizeof(win32.INPUT),40 if x64 else 28)
-        self.assertEqual(ctypes.sizeof(win32.RAWHEADER),24 if x64 else 16)
-        self.assertEqual(ctypes.sizeof(win32.RAWMOUSE),24)
-        self.assertEqual(ctypes.sizeof(win32.RAWKEYBOARD),16)
         self.assertEqual(ctypes.sizeof(win32.EXTENDED_LIMIT),144 if x64 else 112)
+
+    def test_hotkey_rebind_rolls_back_on_conflict(self):
+        from arcmouse import win32
+        monitor=win32.HotkeyMonitor.__new__(win32.HotkeyMonitor)
+        monitor.hwnd=42;monitor.bindings={(0,117):10,(0,118):11};monitor.roles={10:'start',11:'stop'};monitor.next_id=12
+        with patch.object(win32.user,'RegisterHotKey',side_effect=[True,False]), patch.object(win32.user,'UnregisterHotKey') as unregister:
+            with self.assertRaises(OSError):monitor.configure('F8','F9')
+            unregister.assert_called_once_with(42,12)
+        self.assertEqual(monitor.bindings,{(0,117):10,(0,118):11})
+        self.assertEqual(monitor.roles,{10:'start',11:'stop'})
+
+    def test_hotkey_role_swap_preserves_registrations(self):
+        from arcmouse import win32
+        monitor=win32.HotkeyMonitor.__new__(win32.HotkeyMonitor)
+        monitor.hwnd=42;monitor.bindings={(0,117):10,(0,118):11};monitor.roles={};monitor.next_id=12
+        with patch.object(win32.user,'RegisterHotKey') as register,patch.object(win32.user,'UnregisterHotKey') as unregister:
+            self.assertEqual(monitor.configure('F7','F6'),('F7','F6'))
+            register.assert_not_called();unregister.assert_not_called()
+        self.assertEqual(monitor.roles[11],'start');self.assertEqual(monitor.roles[10],'stop')
 
     def test_job_close_terminates_uncooperative_worker(self):
         from arcmouse.win32 import KillJob

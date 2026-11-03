@@ -16,7 +16,7 @@ class FakeSerial:
     def write(self,data):
         self.sent.append(data.decode().strip())
         seq,command,*_=data.decode().split()
-        suffix="ARCMOUSE/1" if command=="HELLO" else "OK"
+        suffix="ARCMOUSE/2" if command=="HELLO" else "OK"
         self.reply.extend(f"{seq} {'ERR' if self.bad else suffix}\n".encode())
 
     def read(self,n):
@@ -34,6 +34,7 @@ class HardwareTests(unittest.TestCase):
         self.mouse=SerialMouse.__new__(SerialMouse)
         self.mouse.serial=self.serial
         self.mouse.sequence=0
+        self.mouse.last_ping=0
         self.mouse.checkpoint=lambda:None
         self.mouse.before_click=lambda:None
         self.mouse.position=lambda:(10,10)
@@ -47,7 +48,7 @@ class HardwareTests(unittest.TestCase):
         with self.assertRaises(OSError): self.mouse.click("left")
         self.assertEqual(self.serial.sent,["1 ARM"])
 
-    def test_final_target_check_before_click(self):
+    def test_final_cancellation_check_before_click(self):
         def lost(): raise OSError("lost")
         self.mouse.before_click=lost
         with self.assertRaises(OSError): self.mouse.click("left")
@@ -57,6 +58,22 @@ class HardwareTests(unittest.TestCase):
         self.mouse.close()
         self.assertEqual(self.serial.sent,["0 STOP"])
         self.assertFalse(self.serial.is_open)
+
+    def test_cancelled_hold_can_still_release(self):
+        self.mouse.press("left")
+        def cancelled(): raise RuntimeError("cancelled")
+        self.mouse.checkpoint=cancelled
+        self.mouse.release("left")
+        self.assertEqual(self.serial.sent,["1 ARM","2 PRESS 1","3 RELEASE 1"])
+
+    def test_keep_alive_refreshes_hold_watchdog(self):
+        self.mouse.keep_alive()
+        self.mouse.keep_alive()
+        self.assertEqual(self.serial.sent,["1 ARM"])
+
+    def test_handshake_requires_protocol_two(self):
+        self.mouse._request("HELLO",handshake=True)
+        self.assertEqual(self.serial.sent,["1 HELLO"])
 
     def test_no_move_if_already_on_target(self):
         self.mouse.move(10,10)
