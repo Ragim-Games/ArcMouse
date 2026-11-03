@@ -4,9 +4,15 @@
 
 ![Current cursor mode](docs/images/simple-clicker.png)
 
+## Windows download
+
+Download the EXE or portable ZIP from [GitHub Releases](https://github.com/Ragim-Games/ArcMouse/releases/latest). The Windows x64 build includes Python, Tkinter, and optional USB serial support, so no Python installation is required. Run the downloaded EXE, or extract the ZIP and open `ArcMouse.exe`.
+
+The executable is unsigned; Windows may display an unknown-publisher warning. Source code remains available below.
+
 ## Run from source
 
-Requires Windows 10/11 and Python 3.11 or later with Tkinter. The default Windows input mode needs no additional packages. This is a source-only distribution; no EXE is provided.
+Requires Windows 10/11 and Python 3.11 or later with Tkinter. The default Windows input mode needs no additional packages. The optional EXE build is available separately from the source.
 
 ```powershell
 git clone https://github.com/Ragim-Games/ArcMouse.git
@@ -71,4 +77,4 @@ python tests/manual_native.py --run
 
 The screenshots show the real Tk interface with its input engine disabled for preview, so the Start button is intentionally disabled.
 
-[Validation results and limitations](docs/VALIDATION.md) · [Architecture](docs/ARCHITECTURE.md) · [MIT License](LICENSE)
+[Build the Windows EXE](docs/BUILDING.md) · [Validation results and limitations](docs/VALIDATION.md) · [Architecture](docs/ARCHITECTURE.md) · [MIT License](LICENSE)

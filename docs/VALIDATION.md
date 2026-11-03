@@ -1,8 +1,16 @@
-# Validation status · 0.3.1
+# Validation status · 0.3.2
 
 Environment: Windows, Python 3.15.0 (64-bit), Tk 9.0. Date: 2026-11-03.
 
-## English interface update
+## Windows executable build (0.3.2)
+
+- The single-file Windows x64 EXE was built locally with Python 3.15.0 and PyInstaller 6.22.3. It includes Tcl/Tk and pySerial 3.5.
+- All 34 source tests passed in the isolated build environment.
+- The packaged EXE completed its own `--self-test` with `frozen: true` and `ok: true`: UI construction, separate hotkey process, worker spawning, Job Objects, IPC, finite cursor dry run, click/hold/slide sequence dry run, cancellation of a 60-second hold, and shutdown.
+- The test generated no mouse input. Physical board testing and unsigned-binary behavior across other Windows machines remain unverified.
+- The release workflow repeats source validation and the packaged self-test before publishing. Release assets include an EXE, a ZIP with documentation and licenses, and SHA-256 checksums.
+
+## English interface update (0.3.1)
 
 - All **34 automated tests passed** after the English conversion. Coverage includes settings and hotkey validation, action order and repetition, post-action delays, hold cancellation, release after a failed slide, dry runs, profile persistence, UI editing and reordering, blocking Start during dialogs, hotkey rollback and swapping, Win32 ABI sizes, real Job Object termination, and serial acknowledgement and watchdog behavior.
 - Python source compilation passed.

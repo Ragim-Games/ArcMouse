@@ -1,5 +1,6 @@
 """Simple cursor clicking plus an optional ordered point list."""
 import multiprocessing as mp
+from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import ttk, filedialog
@@ -42,6 +43,8 @@ class AutoClicker:
         self.last_supervisor=time.monotonic()
         self.last_heartbeat=0
         root.title(f"ArcMouse {__version__}")
+        icon=Path(__file__).resolve().parents[1]/"assets"/"arcmouse.ico"
+        if icon.is_file():root.iconbitmap(str(icon))
         root.configure(bg=BG)
         root.geometry("650x560")
         root.minsize(620,550)
