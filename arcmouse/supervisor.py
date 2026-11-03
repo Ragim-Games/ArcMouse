@@ -4,7 +4,7 @@ import queue
 import time
 
 from .engine import worker_main
-from .model import validate
+from .model import validate_settings
 
 
 def supervisor_main(pipe):
@@ -28,7 +28,7 @@ def supervisor_main(pipe):
             cancel.set()
             worker.join(0.08)
             if job:
-                job.close()  # Kills worker descendants as well, even for trusted scripts.
+                job.close()  # Kills any worker descendants as well.
                 job = None
             if worker.is_alive():
                 worker.terminate()
@@ -75,8 +75,8 @@ def supervisor_main(pipe):
                         send({"type": "error", "message": "이미 실행 중입니다."})
                         continue
                     try:
-                        validate(command["flow"])
-                        settings = command["settings"]
+                        settings = validate_settings(command["settings"])
+                        command["settings"] = settings
                         if settings["backend"] == "hardware" and not settings["dry_run"]:
                             device = settings.get("device", "")
                             if not device or device not in win32.mouse_devices():
@@ -89,11 +89,18 @@ def supervisor_main(pipe):
             if pending and now >= pending[0]:
                 command = pending[1]
                 pending = None
+                try:
+                    if command["target"] is None:
+                        command["target"] = win32.foreground_target(command["client_pid"])
+                except Exception as exc:
+                    monitor.excluded_device = ""
+                    send({"type": "error", "message": str(exc)})
+                    continue
                 cancel, gate = ctx.Event(), ctx.Event()
                 events = ctx.Queue(maxsize=128)
                 terminal_seen = False
                 worker = ctx.Process(target=worker_main,
-                    args=(command["flow"], command["settings"], command["target"],
+                    args=(command["settings"], command["target"],
                           cancel, pause_until, gate, events), name="ArcMouse-Engine")
                 worker.start()
                 worker_deadline = now + 1800

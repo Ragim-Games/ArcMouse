@@ -80,6 +80,7 @@ bind(user, "GetClientRect", W.BOOL, W.HWND, C.POINTER(W.RECT))
 bind(user, "ClientToScreen", W.BOOL, W.HWND, C.POINTER(W.POINT))
 bind(user, "GetDpiForWindow", W.UINT, W.HWND)
 bind(user, "GetForegroundWindow", W.HWND)
+bind(user, "GetClassNameW", C.c_int, W.HWND, W.LPWSTR, C.c_int)
 bind(user, "GetAncestor", W.HWND, W.HWND, W.UINT)
 bind(user, "WindowFromPoint", W.HWND, W.POINT)
 bind(user, "GetCursorPos", W.BOOL, C.POINTER(W.POINT))
@@ -141,7 +142,7 @@ def windows():
     def callback(hwnd, _):
         title = C.create_unicode_buffer(512)
         user.GetWindowTextW(hwnd, title, len(title))
-        if user.IsWindowVisible(hwnd) and title.value:
+        if user.IsWindowVisible(hwnd) and title.value and not desktop_window(hwnd):
             try:
                 item = identity(hwnd)
                 if item["pid"] != os.getpid():
@@ -153,6 +154,22 @@ def windows():
 
     user.EnumWindows(callback, 0)
     return found
+
+
+def desktop_window(hwnd):
+    name = C.create_unicode_buffer(256)
+    user.GetClassNameW(hwnd, name, len(name))
+    return name.value in {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
+
+
+def foreground_target(excluded_pid):
+    hwnd = user.GetForegroundWindow()
+    if not hwnd or desktop_window(hwnd):
+        raise OSError("바탕화면 대신 클릭할 프로그램 창을 선택하세요.")
+    target = identity(hwnd)
+    if target["pid"] == excluded_pid:
+        raise OSError("시작 후 3초 안에 클릭할 프로그램으로 전환하세요.")
+    return target
 
 
 def cursor():

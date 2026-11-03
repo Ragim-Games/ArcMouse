@@ -4,6 +4,7 @@ import multiprocessing as mp
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 
 def idle_child(ready):
@@ -13,6 +14,29 @@ def idle_child(ready):
 
 @unittest.skipUnless(sys.platform == "win32", "Windows native boundary")
 class Win32Tests(unittest.TestCase):
+    def test_auto_target_captures_foreground_identity(self):
+        from arcmouse import win32
+        expected={"hwnd":42,"pid":200,"created":123}
+        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
+             patch.object(win32,"desktop_window",return_value=False), \
+             patch.object(win32,"identity",return_value=expected):
+            self.assertEqual(win32.foreground_target(100),expected)
+
+    def test_auto_target_rejects_own_app(self):
+        from arcmouse import win32
+        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
+             patch.object(win32,"desktop_window",return_value=False), \
+             patch.object(win32,"identity",return_value={"hwnd":42,"pid":100,"created":123}):
+            with self.assertRaisesRegex(OSError,"전환"):
+                win32.foreground_target(100)
+
+    def test_auto_target_rejects_desktop(self):
+        from arcmouse import win32
+        with patch.object(win32.user,"GetForegroundWindow",return_value=42), \
+             patch.object(win32,"desktop_window",return_value=True):
+            with self.assertRaisesRegex(OSError,"바탕화면"):
+                win32.foreground_target(100)
+
     def test_abi_sizes(self):
         from arcmouse import win32
         x64 = ctypes.sizeof(ctypes.c_void_p) == 8

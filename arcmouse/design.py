@@ -1,4 +1,4 @@
-"""Small native UI components for the light studio theme."""
+"""Small native UI components for the light theme."""
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -109,7 +109,8 @@ class Button(tk.Canvas):
 class Toggle(tk.Canvas):
     def __init__(self,parent,variable,text="모의 실행"):
         self.variable,self.text,self.status=variable,text,"normal"
-        super().__init__(parent,width=130,height=34,bg=parent.cget("bg"),bd=0,
+        self.switch_x=max(86,tkfont.Font(family="Malgun Gothic",size=9).measure(text)+12)
+        super().__init__(parent,width=self.switch_x+44,height=34,bg=parent.cget("bg"),bd=0,
                          highlightthickness=0,cursor="hand2",takefocus=1)
         self.trace=variable.trace_add("write",lambda *_:self.redraw())
         self.bind("<Configure>",lambda _:self.redraw())
@@ -135,6 +136,6 @@ class Toggle(tk.Canvas):
         self.delete("all")
         active=self.variable.get()
         self.create_text(0,17,text=self.text,anchor="w",fill=MUTED if self.status=="disabled" else INK,font=("Malgun Gothic",9))
-        rounded(self,86,7,124,27,10,fill=("#36b990" if active else "#c7d0da"),outline=GREEN if focused else "")
-        x=112 if active else 98
+        rounded(self,self.switch_x,7,self.switch_x+38,27,10,fill=("#36b990" if active else "#c7d0da"),outline=GREEN if focused else "")
+        x=self.switch_x+(26 if active else 12)
         self.create_oval(x-8,9,x+8,25,fill=WHITE,outline="")
