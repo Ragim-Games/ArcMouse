@@ -209,14 +209,14 @@ def bezier(start, end, steps=40, bend=0.18):
 
 def demo():
     specs = [
-        ("start", "start", 60, 70, {}, {"next": "init"}),
-        ("init", "set", 60, 190, {"name": "counter", "value": "0"}, {"next": "loop"}),
-        ("loop", "repeat", 60, 310, {"count": "5"}, {"body": "move", "done": "end"}),
-        ("move", "move", 340, 70, {}, {"next": "click"}),
-        ("click", "click", 340, 190, {}, {"next": "increment"}),
-        ("increment", "set", 340, 310, {}, {"next": "wait"}),
-        ("wait", "wait", 340, 430, {}, {"next": "loop"}),
-        ("end", "end", 60, 510, {}, {}),
+        ("start", "start", 30, 35, {}, {"next": "init"}),
+        ("init", "set", 285, 35, {"name": "counter", "value": "0"}, {"next": "loop"}),
+        ("loop", "repeat", 540, 35, {"count": "5"}, {"body": "move", "done": "end"}),
+        ("move", "move", 795, 220, {}, {"next": "click"}),
+        ("click", "click", 540, 220, {}, {"next": "increment"}),
+        ("increment", "set", 285, 220, {}, {"next": "wait"}),
+        ("wait", "wait", 30, 220, {}, {"next": "loop"}),
+        ("end", "end", 795, 35, {}, {}),
     ]
     return {"version": 1, "name": "첫 번째 워크플로", "nodes": [
         {"id": key, "type": kind, "x": x, "y": y,

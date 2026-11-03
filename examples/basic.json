@@ -5,8 +5,8 @@
     {
       "id": "start",
       "type": "start",
-      "x": 60,
-      "y": 70,
+      "x": 30,
+      "y": 35,
       "params": {},
       "edges": {
         "next": "init"
@@ -15,8 +15,8 @@
     {
       "id": "init",
       "type": "set",
-      "x": 60,
-      "y": 190,
+      "x": 285,
+      "y": 35,
       "params": {
         "name": "counter",
         "value": "0"
@@ -28,8 +28,8 @@
     {
       "id": "loop",
       "type": "repeat",
-      "x": 60,
-      "y": 310,
+      "x": 540,
+      "y": 35,
       "params": {
         "count": "5"
       },
@@ -41,8 +41,8 @@
     {
       "id": "move",
       "type": "move",
-      "x": 340,
-      "y": 70,
+      "x": 795,
+      "y": 220,
       "params": {
         "x": "240",
         "y": "180",
@@ -56,8 +56,8 @@
     {
       "id": "click",
       "type": "click",
-      "x": 340,
-      "y": 190,
+      "x": 540,
+      "y": 220,
       "params": {
         "button": "left",
         "interval_ms": 150,
@@ -70,8 +70,8 @@
     {
       "id": "increment",
       "type": "set",
-      "x": 340,
-      "y": 310,
+      "x": 285,
+      "y": 220,
       "params": {
         "name": "counter",
         "value": "counter + 1"
@@ -83,8 +83,8 @@
     {
       "id": "wait",
       "type": "wait",
-      "x": 340,
-      "y": 430,
+      "x": 30,
+      "y": 220,
       "params": {
         "ms": 500
       },
@@ -95,8 +95,8 @@
     {
       "id": "end",
       "type": "end",
-      "x": 60,
-      "y": 510,
+      "x": 795,
+      "y": 35,
       "params": {},
       "edges": {}
     }
