@@ -1,27 +1,37 @@
-# 검증 상태 · 0.3.0
+# Validation status · 0.3.1
 
-2026-11-03, Windows / Python 3.15.0 64비트 / Tk 9.0.
+Environment: Windows, Python 3.15.0 (64-bit), Tk 9.0. Date: 2026-11-03.
 
-## 로컬 확인 완료
+## English interface update
 
-- 자동 테스트 **34개 통과**: 설정·단축키 검증, 순서·반복·동작 후 대기, 홀드 취소, 슬라이드 실패 시 해제, 입력 없는 테스트, 프로필 저장·불러오기, UI 편집·순서 변경·삭제, 대화상자 중 시작 방지, 단축키 재등록 실패 복구와 교환, Win32 ABI, 실제 Job Object 종료, 시리얼 ACK·해제·watchdog 갱신.
-- Python 소스 문법 검사 통과.
-- 실제 앱 시작 후 기본 F6/F7 등록, UI–supervisor–worker 연결, 입력 없는 유한 반복 완료 확인.
-- 현재 커서 / 지점 순서 화면을 실제 Tk로 렌더링하여 확인. README 이미지는 입력 엔진을 끈 미리보기이므로 시작 버튼이 비활성화되어 있습니다.
-- `tests/manual_native.py --run`을 일반 Windows 권한에서 실행하여 **실제 SendInput과 RegisterHotKey**를 검증했습니다. 전용 빈 테스트 창에서 현재 커서 클릭 3회, 클릭→홀드→슬라이드 순서, 후 대기, 실제 드래그 끝점 이벤트를 확인했습니다.
-- F22/F23을 테스트용 시작·중단 키로 등록해 실제 키 이벤트로 실행했습니다. 60초 홀드 중 중단 시 버튼 해제까지 최근 측정 **약 19 ms**. 한 환경의 관측값이며 최악 지연 보장은 아닙니다.
-- 실제 전체 화면 선택 오버레이에서 슬라이드 시작·끝 지정, 화면 번호 드래그 후 위치 변경 확인.
+- All **34 automated tests passed** after the English conversion. Coverage includes settings and hotkey validation, action order and repetition, post-action delays, hold cancellation, release after a failed slide, dry runs, profile persistence, UI editing and reordering, blocking Start during dialogs, hotkey rollback and swapping, Win32 ABI sizes, real Job Object termination, and serial acknowledgement and watchdog behavior.
+- Python source compilation passed.
+- All application-owned labels, status messages, validation errors, point-picker instructions, and profile dialog titles were converted to English. The README, architecture guide, hardware guide, and this validation record are in English.
+- Current cursor, Point sequence, and Settings were rendered using the actual Tk UI and visually checked for clipping. Both README screenshots were replaced with English captures. Their Start buttons are intentionally disabled because the input engine was off during capture.
+- Profile format version 3 and action identifiers are unchanged. Display labels are not stored in profiles, so existing 0.3 profiles remain compatible.
+- Repository text files were scanned for remaining Korean text. Firmware comments, CI configuration, and licensing were already in English.
 
-네이티브 검증은 키·커서 입력을 전용 테스트 창/자체 오버레이에 보내며, 시작 전 창 소유와 포커스를 검사하고 실행 중 포커스 유실 시 중단합니다. 자동 테스트에는 실제 데스크톱 클릭이 없습니다. 샌드박스에서 전역 키 등록이 거부되어 실입력 테스트는 일반 실행 환경에서 수행했습니다.
+Windows-provided file dialog controls and system error descriptions can follow the Windows display language. ArcMouse does not change the user's OS language.
 
-## 미검증 범위
+## Previous native input validation (0.3.0)
 
-- Leonardo/Pico 실물 보드 컴파일·업로드·연결·watchdog·물리 정지 버튼.
-- 모든 DPI·다중 모니터 조합, 독점 입력 앱, 관리자 권한 앱.
-- 장시간 부하, 최대 CPS, 여러 하드웨어에서의 CPU/지연 분포.
-- GitHub CI 결과는 로컬 테스트 결과와 별도입니다.
+The following results were recorded before the interface translation. Native input injection was not repeated for the language-only update.
 
-## 재현
+- Actual app startup, default F6/F7 registration, UI–supervisor–worker communication, and finite dry-run completion passed.
+- `tests/manual_native.py --run` verified actual **SendInput and RegisterHotKey** in a dedicated blank window: three current-cursor clicks, a click → hold → slide sequence, post-action waits, and drag endpoint events.
+- F22/F23 were registered as test Start/Stop keys. Stopping a 60-second hold released the button in approximately **19 ms** in the latest recorded run. This is a measurement from one environment, not a worst-case latency guarantee.
+- The full-screen picker accepted a slide's start and end points, and dragging a numbered marker updated its position.
+
+The native test sends input to its own blank window and overlays. It checks window ownership and focus before starting and stops if focus is lost during execution. Automated tests do not inject desktop clicks. Native input testing required a normal Windows environment because the sandbox rejected global hotkey registration.
+
+## Not yet validated
+
+- Physical Leonardo/Pico compilation, upload, connection, watchdog behavior, and stop button.
+- Every DPI and multi-monitor combination, exclusive input application, and elevated application.
+- Sustained load, maximum click rate, and CPU/latency distributions across hardware.
+- GitHub CI results must be checked separately from these local results.
+
+## Reproduce
 
 ```powershell
 python -m compileall -q arcmouse main.py firmware/pico
@@ -29,4 +39,4 @@ python -m unittest discover -s tests -v
 python tests/manual_native.py --run
 ```
 
-마지막 명령은 실제 입력을 사용하므로 유휴 Windows 데스크톱에서 실행합니다. UI를 직접 점검할 때는 현재 커서 모드에서 F6/F7, 키 변경·적용, 지점 추가·번호 이동·시간 수정·저장·열기·실행·중단을 순서대로 확인하세요.
+The last command uses real input and should run on an idle Windows desktop. For a manual UI check, verify F6/F7 in Current cursor mode, edit and apply hotkeys, then add points, drag markers, edit timing, save, open, start, and stop a sequence.

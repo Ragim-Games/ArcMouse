@@ -91,7 +91,7 @@ def dpi_aware():
 def cursor():
     point = W.POINT()
     if not user.GetCursorPos(C.byref(point)):
-        raise OSError("커서 위치를 읽을 수 없습니다.")
+        raise OSError("Cannot read the cursor position.")
     return point.x, point.y
 
 
@@ -102,7 +102,7 @@ def mouse_input(flags, x=0, y=0):
 def send_inputs(*items):
     array = (INPUT * len(items))(*items)
     if user.SendInput(len(items), array, C.sizeof(INPUT)) != len(items):
-        raise OSError("Windows가 입력을 차단했습니다. 대상 앱의 권한을 확인하세요.")
+        raise OSError("Windows blocked input. Check the receiving app's permissions.")
 
 
 class SoftwareMouse:
@@ -112,7 +112,7 @@ class SoftwareMouse:
         ax = round((x - left) * 65535 / max(1, width - 1))
         ay = round((y - top) * 65535 / max(1, height - 1))
         if not (0 <= ax <= 65535 and 0 <= ay <= 65535):
-            raise OSError("가상 디스플레이 밖의 좌표입니다.")
+            raise OSError("The coordinates are outside the virtual desktop.")
         send_inputs(mouse_input(0x8000 | 0x4000 | 0x0001, ax, ay))
 
     def click(self, button):
@@ -154,7 +154,7 @@ def screen_bounds():
 def check_screen_point(x,y):
     left,top,width,height=screen_bounds()
     if not (left<=x<left+width and top<=y<top+height):
-        raise OSError("저장된 지점이 현재 화면 밖에 있습니다. 지점을 다시 지정하세요.")
+        raise OSError("A saved point is outside the current screen. Pick that point again.")
 
 
 class HotkeyMonitor:
@@ -188,8 +188,8 @@ class HotkeyMonitor:
                 if not user.RegisterHotKey(self.hwnd,identifier,flags|0x4000,vk):
                     error=C.get_last_error()
                     if error==1409:
-                        raise OSError(f"{name} 단축키는 다른 앱에서 사용 중입니다. 다른 키를 선택하세요.")
-                    raise OSError(f"{name} 단축키 등록 실패 (Windows 오류 {error}). 실행 환경의 입력 권한을 확인하세요.")
+                        raise OSError(f"{name} is already used by another app. Choose another hotkey.")
+                    raise OSError(f"Cannot register {name} (Windows error {error}). Check input permissions in this environment.")
                 next_bindings[key]=identifier
                 newly_registered.append(identifier)
         except Exception:
@@ -243,7 +243,7 @@ class KillJob:
         if (not kernel.SetInformationJobObject(self.handle, 9, C.byref(limits), C.sizeof(limits)) or
                 not kernel.AssignProcessToJobObject(self.handle, int(process_handle))):
             self.close()
-            raise OSError("실행 프로세스의 종료 보호(Job Object)를 설정할 수 없습니다.")
+            raise OSError("Cannot configure process termination protection (Windows Job Object).")
 
     def close(self):
         if self.handle:

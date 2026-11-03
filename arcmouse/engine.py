@@ -19,7 +19,7 @@ class Engine:
 
     def checkpoint(self):
         if self.cancel.is_set(): raise Cancelled()
-        if time.monotonic()>=self.deadline: raise SettingsError("30분 실행 한도에 도달했습니다.")
+        if time.monotonic()>=self.deadline: raise SettingsError("The 30-minute session limit has been reached.")
 
     def wait(self,ms):
         end=time.monotonic()+max(MIN_DELAY_MS,number(ms,0,3600000))/1000

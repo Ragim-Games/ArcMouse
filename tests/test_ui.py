@@ -29,7 +29,7 @@ class UITests(unittest.TestCase):
         a.reorder(-1)
         self.assertEqual(a.actions[0]['type'],'hold');self.assertEqual(a.actions[0]['wait_ms'],321)
         self.assertEqual(a.actions[0]['duration_ms'],765)
-        a.delete_point();a.repeat_mode.set('횟수 지정');a.count.set('2')
+        a.delete_point();a.repeat_mode.set('Fixed count');a.count.set('2')
         s=a.collect_settings();self.assertEqual([x['type'] for x in s['actions']],['click','slide']);self.assertEqual(s['count'],2)
     def test_run_hides_markers_and_sends_current_settings(self):
         a=self.app;a.switch_mode('points');self.add('hold');a.wait_value.set('456')

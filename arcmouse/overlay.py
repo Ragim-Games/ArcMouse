@@ -28,8 +28,8 @@ class PointPicker:
         self.window.geometry(f"{width}x{height}+0+0")
         self.canvas=tk.Canvas(self.window,bg="#0a6456",highlightthickness=0,cursor="crosshair")
         self.canvas.pack(fill="both",expand=True)
-        hint="시작점에서 끝점까지 드래그하세요" if kind=="slide" else "클릭할 지점을 누르세요"
-        self.canvas.create_text(-left+40,-top+42,text=hint+"  ·  Esc 취소",anchor="w",fill="white",font=("Malgun Gothic",20,"bold"))
+        hint="Drag from the start point to the end point" if kind=="slide" else "Click to choose a point"
+        self.canvas.create_text(-left+40,-top+42,text=hint+"  ·  Esc to cancel",anchor="w",fill="white",font=("Segoe UI",20,"bold"))
         self.canvas.bind("<ButtonPress-1>",self.press)
         self.canvas.bind("<B1-Motion>",self.motion)
         self.canvas.bind("<ButtonRelease-1>",self.release)

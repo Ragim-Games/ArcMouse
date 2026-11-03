@@ -7,7 +7,7 @@ class SerialMouse:
         try:
             import serial
         except ImportError as exc:
-            raise RuntimeError("하드웨어 모드는 pip install -r requirements-hardware.txt가 필요합니다.") from exc
+            raise RuntimeError("Hardware mode requires: pip install -r requirements-hardware.txt") from exc
         self.checkpoint, self.position = checkpoint, position
         self.before_click = before_click
         self.sequence = 0
@@ -47,11 +47,11 @@ class SerialMouse:
                 line = response.decode("ascii", errors="replace").strip()
                 if line == expected:
                     return
-                raise OSError(f"MCU 응답 오류: {line}")
+                raise OSError(f"Invalid MCU response: {line}")
             response.extend(chunk)
             if len(response) > 96:
-                raise OSError("MCU 응답 길이 초과")
-        raise OSError("MCU 응답 시간 초과: 입력을 중단했습니다.")
+                raise OSError("MCU response exceeded the length limit.")
+        raise OSError("MCU response timed out. Input has stopped.")
 
     def move(self, x, y):
         # Relative HID is affected by OS acceleration. Closed-loop cursor feedback
@@ -66,7 +66,7 @@ class SerialMouse:
             dy = max(-20, min(20, round(dy / 2) or (1 if dy > 0 else -1))) if dy else 0
             self._request(f"MOVE {dx} {dy}")
             time.sleep(0.005)
-        raise OSError("HID 상대 이동이 목표 좌표에 수렴하지 않았습니다.")
+        raise OSError("Relative HID movement did not converge on the destination.")
 
     def click(self, button):
         code = {"left": 1, "right": 2, "middle": 4}[button]

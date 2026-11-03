@@ -16,37 +16,37 @@ class SettingsError(ValueError):
 
 
 def number(value, low=0, high=1e9):
-    if isinstance(value,bool): raise SettingsError("숫자를 입력하세요.")
+    if isinstance(value,bool): raise SettingsError("Enter a number.")
     try: result=float(value)
-    except (ValueError,TypeError,OverflowError) as exc: raise SettingsError("숫자를 입력하세요.") from exc
+    except (ValueError,TypeError,OverflowError) as exc: raise SettingsError("Enter a number.") from exc
     if not math.isfinite(result) or not low<=result<=high:
-        raise SettingsError(f"{low:g}~{high:g} 범위로 입력하세요.")
+        raise SettingsError(f"Enter a value between {low:g} and {high:g}.")
     return result
 
 
 def hotkey(value):
-    if not isinstance(value,str): raise SettingsError("단축키 형식 오류")
+    if not isinstance(value,str): raise SettingsError("Invalid hotkey format.")
     parts=[p.strip().upper() for p in value.split("+")]
-    if not parts or any(not p for p in parts): raise SettingsError("예: F6 또는 Ctrl+Alt+S")
+    if not parts or any(not p for p in parts): raise SettingsError("Example: F6 or Ctrl+Alt+S.")
     aliases={"CONTROL":"CTRL","CTL":"CTRL","OPTION":"ALT"}
     mods=[aliases.get(p,p) for p in parts[:-1]]
     if len(set(mods))!=len(mods) or any(m not in ("CTRL","ALT","SHIFT") for m in mods):
-        raise SettingsError("Ctrl, Alt, Shift와 키 하나를 조합하세요.")
+        raise SettingsError("Combine Ctrl, Alt, or Shift with one key.")
     key=parts[-1]
     names={"SPACE":32,"ENTER":13,"ESC":27,"ESCAPE":27,"HOME":36,"END":35,"INSERT":45,"DELETE":46,
            "PAGEUP":33,"PAGEDOWN":34}
     if key.startswith("F") and key[1:].isdigit() and 1<=int(key[1:])<=24:
-        if int(key[1:])==12: raise SettingsError("F12는 Windows 예약 키입니다. F6/F7 등 다른 키를 선택하세요.")
+        if int(key[1:])==12: raise SettingsError("F12 is reserved by Windows. Choose another key, such as F6 or F7.")
         vk=111+int(key[1:])
         key=f"F{int(key[1:])}"
     elif len(key)==1 and key.isascii() and key.isalnum():
         if not any(m in mods for m in ("CTRL","ALT")):
-            raise SettingsError("문자·숫자 키에는 Ctrl 또는 Alt를 함께 지정하세요.")
+            raise SettingsError("Combine letter or number keys with Ctrl or Alt.")
         vk=ord(key)
     elif key in names:
         vk=names[key]
         if key=="ESCAPE": key="ESC"
-    else: raise SettingsError("지원하는 단축키를 입력하세요. 예: F6, Ctrl+Alt+S")
+    else: raise SettingsError("Enter a supported hotkey, such as F6 or Ctrl+Alt+S.")
     flags=sum({"ALT":1,"CTRL":2,"SHIFT":4}[m] for m in mods)
     canonical="+".join([label for token,label in (("CTRL","Ctrl"),("ALT","Alt"),("SHIFT","Shift")) if token in mods]+[key])
     return flags,vk,canonical
@@ -54,22 +54,22 @@ def hotkey(value):
 
 def hotkey_pair(start,stop):
     a,b=hotkey(start),hotkey(stop)
-    if a[:2]==b[:2]: raise SettingsError("시작과 중단 단축키는 다르게 지정하세요.")
+    if a[:2]==b[:2]: raise SettingsError("Choose different hotkeys for Start and Stop.")
     emergency=hotkey(EMERGENCY)
     if a[:2]==emergency[:2] or b[:2]==emergency[:2]:
-        raise SettingsError("Ctrl+Alt+Shift+K는 비상 정지용으로 남겨두세요.")
+        raise SettingsError("Ctrl+Alt+Shift+K is reserved for emergency stop.")
     return a,b
 
 
 def action(source):
-    if not isinstance(source,dict): raise SettingsError("지점 형식 오류")
+    if not isinstance(source,dict): raise SettingsError("Invalid point format.")
     allowed={"type","x","y","end_x","end_y","duration_ms","wait_ms","button"}
-    if set(source)-allowed: raise SettingsError("알 수 없는 지점 설정")
+    if set(source)-allowed: raise SettingsError("Unknown point setting.")
     result={"type":"click","duration_ms":500,"wait_ms":100,"button":"left",**source}
-    if result["type"] not in ("click","hold","slide"): raise SettingsError("클릭/홀드/슬라이드를 선택하세요.")
-    if result["button"] not in ("left","right","middle"): raise SettingsError("마우스 버튼 오류")
+    if result["type"] not in ("click","hold","slide"): raise SettingsError("Choose Click, Hold, or Slide.")
+    if result["button"] not in ("left","right","middle"): raise SettingsError("Invalid mouse button.")
     for key in ("x","y")+(("end_x","end_y") if result["type"]=="slide" else ()):
-        if key not in result: raise SettingsError("먼저 화면에서 지점을 지정하세요.")
+        if key not in result: raise SettingsError("Pick a point on the screen first.")
         result[key]=int(round(number(result[key],-100000,100000)))
     result["duration_ms"]=number(result["duration_ms"],5,60000)
     result["wait_ms"]=max(MIN_DELAY_MS,number(result["wait_ms"],0,3600000))
@@ -77,25 +77,25 @@ def action(source):
 
 
 def validate_settings(source, require_actions=True):
-    if not isinstance(source,dict) or set(source)-set(DEFAULTS): raise SettingsError("클릭 설정 형식 오류")
+    if not isinstance(source,dict) or set(source)-set(DEFAULTS): raise SettingsError("Invalid click settings.")
     result={**DEFAULTS,**source}
     result["interval_ms"]=max(MIN_DELAY_MS,number(result["interval_ms"],0,60000))
     count=number(result["count"],0,10000000)
-    if int(count)!=count: raise SettingsError("반복 횟수는 정수로 입력하세요.")
+    if int(count)!=count: raise SettingsError("Repeat count must be a whole number.")
     result["count"]=int(count)
-    if result["button"] not in ("left","right","middle"): raise SettingsError("마우스 버튼 오류")
-    if result["mode"] not in ("cursor","points"): raise SettingsError("모드 오류")
-    if type(result["dry_run"]) is not bool: raise SettingsError("테스트 옵션 형식 오류")
+    if result["button"] not in ("left","right","middle"): raise SettingsError("Invalid mouse button.")
+    if result["mode"] not in ("cursor","points"): raise SettingsError("Invalid mode.")
+    if type(result["dry_run"]) is not bool: raise SettingsError("Invalid dry-run option.")
     if not isinstance(result["actions"],list) or len(result["actions"])>MAX_ACTIONS:
-        raise SettingsError(f"지점은 최대 {MAX_ACTIONS}개입니다.")
+        raise SettingsError(f"You can add up to {MAX_ACTIONS} points.")
     result["actions"]=[action(a) for a in result["actions"]]
     if require_actions and result["mode"]=="points" and not result["actions"]:
-        raise SettingsError("실행할 지점을 먼저 추가하세요.")
+        raise SettingsError("Add at least one point before starting.")
     a,b=hotkey_pair(result["start_hotkey"],result["stop_hotkey"])
     result["start_hotkey"],result["stop_hotkey"]=a[2],b[2]
-    if result["backend"] not in ("software","hardware"): raise SettingsError("입력 방식 오류")
+    if result["backend"] not in ("software","hardware"): raise SettingsError("Invalid input method.")
     if not isinstance(result["port"],str) or (result["backend"]=="hardware" and not result["port"].strip()):
-        raise SettingsError("USB 포트를 입력하세요.")
+        raise SettingsError("Enter a USB serial port.")
     return result
 
 
@@ -109,7 +109,7 @@ def save_profile(path,settings):
 
 def load_profile(path):
     path=Path(path)
-    if path.stat().st_size>1_000_000: raise SettingsError("파일은 1 MB 이하여야 합니다.")
+    if path.stat().st_size>1_000_000: raise SettingsError("The profile must be no larger than 1 MB.")
     data=json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data,dict) or data.get("version")!=3: raise SettingsError("지원하지 않는 설정 파일입니다.")
+    if not isinstance(data,dict) or data.get("version")!=3: raise SettingsError("Unsupported profile format.")
     return validate_settings(data.get("settings"),require_actions=False)

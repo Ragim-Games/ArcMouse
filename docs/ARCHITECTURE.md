@@ -1,25 +1,25 @@
-# 내부 구조 · 0.3
+# Architecture · 0.3
 
-UI는 현재 커서 반복 클릭과 단순한 순서 목록만 제공합니다. 대상 창 검색, 워크플로 그래프, 스크립트 주입 계층은 없습니다.
+The UI provides repeated clicks at the current cursor and a simple ordered list of point actions. There is no target-window search, workflow graph, or script injection layer.
 
-| 모듈 | 역할 |
+| Module | Responsibility |
 |---|---|
-| ui.py / design.py | 흰색 UI, 시간·횟수·단축키 편집, 프로필 |
-| overlay.py | 전체 화면 지점 선택, 드래그 가능한 번호 |
-| model.py | 설정 검증·정규화, 단축키 해석, JSON 저장 |
-| supervisor.py | 독립 전역 키 감시, heartbeat, 실행·중단, Job Object |
-| engine.py | 현재 커서 클릭 또는 클릭/홀드/슬라이드 순서 실행 |
-| win32.py | SendInput, RegisterHotKey, DPI, 가상 화면, Job Object |
-| hardware.py | 순차 ACK 기반 USB 보드 통신 |
+| ui.py / design.py | Light UI, timing, repetition, hotkey editing, and profiles |
+| overlay.py | Full-screen point selection and draggable numbered markers |
+| model.py | Settings validation and normalization, hotkey parsing, JSON persistence |
+| supervisor.py | Independent global hotkey monitoring, heartbeats, execution, stopping, and Job Objects |
+| engine.py | Current-cursor clicks or ordered click, hold, and slide actions |
+| win32.py | SendInput, RegisterHotKey, DPI awareness, virtual desktop bounds, and Job Objects |
+| hardware.py | Sequential, acknowledged USB board communication |
 
-시작 키는 supervisor에서 UI로 전달되고, UI는 최신 설정을 검증해 전송합니다. 파일 대화상자·지점 선택·설정 창에서는 시작하지 않습니다. 변경한 단축키가 아직 적용되지 않았으면 실행을 거부합니다. 키 재등록 실패 시 새로 등록한 키만 해제해 기존 시작·중단 키를 보존합니다. 두 키를 서로 교환할 때는 기존 등록을 재사용합니다.
+The supervisor forwards Start hotkeys to the UI, which validates and sends the latest settings. Execution cannot start while a file dialog, point picker, or settings window is open. Unapplied hotkey changes also prevent execution. If rebinding fails, only newly registered keys are released, preserving the existing Start and Stop bindings. Swapping the two hotkeys reuses their existing registrations.
 
-worker는 Job Object 할당이 완료된 뒤 gate 이벤트를 통과합니다. 현재 커서 모드는 간격 대기 후 버튼을 클릭합니다. 지점 모드는 지정 위치 이동 → 동작 → 해당 동작의 후 대기 순서입니다. 반복 횟수는 커서 모드에서 클릭 수, 지점 모드에서 전체 목록 실행 수입니다. 슬라이드는 버튼을 누른 채 선택한 선분을 smoothstep 가감속으로 이동합니다.
+A worker waits on a gate until its Job Object has been assigned. Current cursor mode waits for the interval, then clicks. Point sequence mode moves to the point, performs the action, then waits for that action's post-action delay. Repeat count means individual clicks in cursor mode and complete sequence cycles in point mode. Slides hold the button while moving along the selected segment with smoothstep acceleration and deceleration.
 
-대기는 취소 이벤트를 최대 10 ms 간격으로 확인합니다. 동작 대기·이동 모두 종료 기한을 확인합니다. 눌린 버튼 상태는 공유 메모리에 기록하며 정상 취소는 finally에서, worker 강제 종료는 supervisor에서 해제합니다. UI도 supervisor 유실 시 소프트웨어 버튼 해제를 시도합니다. MCU는 호스트가 종료되면 자체 watchdog으로 해제합니다.
+Waits check cancellation at intervals of at most 10 ms. Waits and movement also check the session deadline. Held-button state is recorded in shared memory. Normal cancellation releases the button in a finally block; the supervisor releases software buttons after forced worker termination. The UI also attempts release if the supervisor is lost. MCU firmware uses its own watchdog if the host exits.
 
-전역 중단은 UI 응답과 독립적입니다. 취소 후 80 ms 안에 worker가 끝나지 않으면 Job Object를 닫습니다. UI heartbeat가 2.5초 없으면 종료하며 별도의 30분 세션 한도가 있습니다. 시작 요청에는 epoch를 붙여 중단 전에 발행된 지연 시작 요청을 무시합니다. worker 종료를 확인한 뒤 완료를 UI에 보내므로 완료 직후 재시작과 정리 작업이 경합하지 않습니다.
+Global stopping is independent of UI responsiveness. If a worker has not exited within 80 ms after cancellation, the supervisor closes its Job Object. Execution stops after 2.5 seconds without a UI heartbeat, and an independent 30-minute session limit also applies. Hotkey start requests carry an epoch so requests issued before a stop cannot restart execution later. Completion is sent to the UI only after the worker has exited, avoiding a race between immediate restart and cleanup.
 
-각 프로필은 버전 3의 검증된 JSON입니다. 임시 파일에 기록한 뒤 교체하며 불러오기는 최대 1 MB로 제한합니다. 좌표는 DPI 인식 프로세스에서 얻은 가상 화면 픽셀이며 음수 모니터 원점을 지원합니다. 창을 추적하거나 레이아웃 변경 후 좌표를 재계산하지 않습니다.
+Profiles are validated JSON using format version 3. They are written to a temporary file and then replaced; imports are limited to 1 MB. Display labels are not serialized, so changing the interface language does not change existing profile keys or action values. Coordinates are virtual desktop pixels read by a DPI-aware process, including negative monitor origins. The app does not track windows or recalculate saved points after layout changes.
 
-Windows 전체 정지, 보안 데스크톱, UIPI 차단까지 입력·중단을 보장하지 않습니다. 5 ms 하한은 CPU 독점을 막는 대기 하한이며 정확한 CPS 보장이 아닙니다.
+Input and stopping cannot be guaranteed during a complete Windows freeze, on the secure desktop, or when UIPI blocks input. The 5 ms floor prevents a busy loop; it is not a guarantee of an exact click rate.

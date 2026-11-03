@@ -1,12 +1,12 @@
 # ArcMouse
 
-**현재 커서를 반복 클릭하거나, 미리 찍어 둔 지점을 순서대로 실행하는 Windows 오토클릭 앱.**
+**A Windows auto-clicker for repeated clicks at the current cursor or a sequence of points picked on screen.**
 
-![현재 커서 모드](docs/images/simple-clicker.png)
+![Current cursor mode](docs/images/simple-clicker.png)
 
-## 소스에서 실행
+## Run from source
 
-Windows 10/11, Python 3.11 이상과 Tkinter가 필요합니다. 기본 모드는 추가 패키지 없이 실행됩니다. EXE 배포본은 만들지 않습니다.
+Requires Windows 10/11 and Python 3.11 or later with Tkinter. The default Windows input mode needs no additional packages. This is a source-only distribution; no EXE is provided.
 
 ```powershell
 git clone https://github.com/Ragim-Games/ArcMouse.git
@@ -14,59 +14,61 @@ cd ArcMouse
 python main.py
 ```
 
-이미 받아 둔 소스는 `git pull` 후 `python main.py`로 실행하세요.
+To update an existing checkout, run `git pull`, then `python main.py`.
 
-## 현재 커서: 간격 → 시작 → 중단
+## Current cursor: set an interval, start, stop
 
-1. **현재 커서**에서 클릭 간격·버튼·반복 횟수를 정합니다.
-2. 원하는 위치에 커서를 놓고 **F6**을 누릅니다.
-3. **F7**로 중단합니다. 시작·중단 키는 화면에서 변경한 뒤 **적용**하세요.
+1. Select **Current cursor** and set the click interval, mouse button, and repeat count.
+2. Place the cursor where you want to click and press **F6**.
+3. Press **F7** to stop. To change either hotkey, edit it in the app and select **Apply**.
 
-대상 프로그램을 선택하거나 좌표를 입력할 필요가 없습니다. 기본값은 100 ms, 왼쪽 버튼, 중단할 때까지 반복입니다. 실행 시 ArcMouse 창은 최소화되고, 완료·중단 시 다시 나타납니다. 물리 마우스를 움직여도 자동 일시정지하지 않으므로 중단 키를 사용하세요.
+No target window or coordinate entry is required. Defaults are a 100 ms interval, the left mouse button, and repetition until stopped. ArcMouse minimizes when execution starts and returns when it finishes or stops. Moving the physical mouse does not automatically pause execution; use your Stop hotkey.
 
-문자 키는 `Ctrl+Alt+S`처럼 Ctrl 또는 Alt와 조합합니다. 시작·중단에 같은 키를 쓸 수 없습니다. 키 등록 실패 시 이유를 표시하고 기존 키를 유지합니다. F12는 선택 대상에서 제외했습니다. 별도 비상 정지 키는 **Ctrl+Alt+Shift+K**이며 등록되지 못하면 화면 하단에 대신 설정한 중단 키를 사용하도록 표시됩니다.
+Combine letter keys with Ctrl or Alt, for example `Ctrl+Alt+S`. Start and Stop must use different hotkeys. If registration fails, the app explains the error and keeps the previous bindings. F12 is excluded. **Ctrl+Alt+Shift+K** is a separate emergency stop shortcut; if it cannot be registered, the footer tells you to use your configured Stop hotkey instead.
 
-## 지점 순서: 화면에 찍어 두고 실행
+## Point sequence: pick points, then run
 
-![지점 순서 모드](docs/images/point-actions.png)
+![Point sequence mode](docs/images/point-actions.png)
 
-1. **지점 순서** 탭을 엽니다.
-2. **＋ 클릭** 또는 **＋ 홀드**를 누르고 화면에서 원하는 지점을 클릭합니다. **＋ 슬라이드**는 시작점에서 끝점까지 드래그합니다. 선택 취소는 Esc입니다.
-3. 목록에서 지점을 선택해 **동작 후 대기(ms)**를 설정하고 **적용**합니다. 홀드와 슬라이드는 **동작 시간(ms)**도 따로 설정합니다.
-4. 필요하면 ↑/↓로 순서를 바꾸거나 삭제합니다. **번호 표시**를 켜면 번호를 드래그해 위치를 조절할 수 있습니다. 슬라이드는 A가 시작, B가 끝입니다.
-5. 전체 순서의 반복 횟수를 정하고 시작 키를 누릅니다.
+1. Open **Point sequence**.
+2. Select **+ Click** or **+ Hold**, then click a location on the screen. For **+ Slide**, drag from the start point to the end point. Press Esc to cancel selection.
+3. Select a point in the list, set **Wait after action (ms)**, and select **Apply**. Holds and slides also have a separate **Hold / slide duration (ms)** setting.
+4. Use the up/down arrows to reorder points, or select **Delete**. Enable **Show markers** to drag the numbered markers into position. For slides, A is the start and B is the end.
+5. Set how many times to repeat the entire sequence, then press your Start hotkey.
 
-예: `1번 클릭 → 250 ms 대기 → 2번을 800 ms 홀드 → 300 ms 대기 → 3번 A에서 B까지 600 ms 슬라이드 → 1000 ms 대기` 후 다음 반복을 시작합니다. 마지막 동작의 대기 시간도 적용합니다. 슬라이드는 선택한 마우스 버튼을 누른 채 이동하는 드래그입니다.
+Example: `Click point 1 → wait 250 ms → hold point 2 for 800 ms → wait 300 ms → slide from 3A to 3B over 600 ms → wait 1000 ms`, then begin the next cycle. The final action's wait also applies. A slide is a drag with the selected mouse button held down.
 
-실행 전 번호 표시는 숨겨지고 앱 창은 최소화됩니다. 지점은 최대 200개입니다. 화면상의 픽셀 위치를 저장하므로 프로그램 창이나 모니터 배치·배율을 바꾼 뒤에는 위치를 다시 확인하세요. 저장된 지점이 현재 가상 화면 밖이면 실행을 거부합니다.
+Markers are hidden and the app minimizes before execution. A sequence supports up to 200 points. Points use screen pixel coordinates, so check them again after moving application windows or changing monitor layout or display scaling. Execution is rejected if a saved point is outside the current virtual desktop.
 
-**저장 / 열기**로 지점, 순서, 시간, 반복, 단축키를 JSON 파일에 보관할 수 있습니다. 0.3 버전 형식을 사용하며, 이전 워크플로 파일은 지원하지 않습니다.
+Use **Save / Open** to store points, order, timing, repetition, and hotkeys in a JSON profile. Profile format version 3 is used; older workflow files are not supported. Existing 0.3 profiles remain compatible with the English interface.
 
-## 실행과 중단
+## Execution and stopping
 
-- UI, 전역 단축키 감시, 입력 엔진을 별도 프로세스로 실행합니다.
-- 0 ms 대기는 최소 5 ms로 보정합니다. 홀드·슬라이드 동작 시간은 5~60,000 ms입니다.
-- 중단 시 홀드·슬라이드의 눌린 버튼을 해제합니다. 응답하지 않는 엔진은 Windows Job Object로 종료합니다.
-- UI 응답 유실과 30분 연속 실행 한도에서 중단합니다.
-- **설정 → 입력 없이 테스트**에서는 실제 입력을 보내지 않습니다.
+- The UI, global hotkey monitor, and input engine run in separate processes.
+- A 0 ms wait is clamped to a minimum of 5 ms. Hold and slide durations range from 5 to 60,000 ms.
+- Stopping releases any button held by a hold or slide. An unresponsive worker is terminated through a Windows Job Object.
+- Execution stops if the UI stops responding or a session reaches 30 minutes.
+- **Settings → Dry run (no mouse input)** runs without sending mouse input.
 
-소프트웨어 입력은 Windows의 권한 제한을 받습니다. 관리자 권한 앱이나 입력을 별도 처리하는 프로그램에서는 동작하지 않을 수 있습니다. 설정한 ms는 목표 대기 시간이며 OS 스케줄링·USB 왕복 지연에 따라 실제 시간이 늘어납니다.
+Software input is subject to Windows permission restrictions. Elevated apps or programs with specialized input handling may reject it. Millisecond values are requested timings; OS scheduling and USB round trips can increase actual durations.
 
-## USB 보드 (선택)
+## USB board support (optional)
 
-**설정 → USB 보드**에서 COM 포트를 지정합니다. 기본 Windows 입력 모드에는 보드가 필요 없습니다. Leonardo/Micro 및 Pico용 소스와 **ARCMOUSE/2** 프로토콜 설명은 [하드웨어 문서](docs/HARDWARE.md)에 있습니다. 이전 펌웨어는 업데이트해야 합니다. 실물 보드 검증은 아직 수행하지 않았습니다.
+Select **Settings → USB board** and enter its COM port. A board is not needed for Windows input mode. See the [hardware guide](docs/HARDWARE.md) for Leonardo/Micro and Pico firmware sources and the **ARCMOUSE/2** protocol. Older firmware must be updated. Physical board validation has not yet been performed.
 
-## 개발·검증
+## Development and validation
 
 ```powershell
 python -m compileall -q arcmouse main.py firmware/pico
 python -m unittest discover -s tests -v
 ```
 
-실제 입력 검증은 별도 실행합니다. 아래 명령은 전용 빈 테스트 창에서 유한한 클릭·홀드·슬라이드, 전역 키, 지점 선택과 번호 드래그를 검사합니다. 테스트 중에는 마우스·키보드를 사용하지 마세요.
+Native input validation is a separate, opt-in command. It uses a dedicated blank test window to check finite clicks, holds, slides, global hotkeys, point selection, and marker dragging. Do not use the mouse or keyboard during this test.
 
 ```powershell
 python tests/manual_native.py --run
 ```
 
-[검증 결과와 제한](docs/VALIDATION.md) · [내부 구조](docs/ARCHITECTURE.md) · MIT License
+The screenshots show the real Tk interface with its input engine disabled for preview, so the Start button is intentionally disabled.
+
+[Validation results and limitations](docs/VALIDATION.md) · [Architecture](docs/ARCHITECTURE.md) · [MIT License](LICENSE)

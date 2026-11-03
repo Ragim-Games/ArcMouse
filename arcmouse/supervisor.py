@@ -59,12 +59,12 @@ def supervisor_main(pipe,held_state=None):
             # Stop wins if both hotkeys arrive in one batch.
             requests=monitor.requests[:]
             monitor.requests.clear()
-            if "stop" in requests: stop("중단했습니다")
+            if "stop" in requests: stop("Stopped")
             elif "start" in requests and not worker and configured:
                 send({"type":"hotkey_start","epoch":epoch})
-            if worker and now>=deadline: stop("30분 실행 한도에 도달했습니다")
+            if worker and now>=deadline: stop("The 30-minute session limit has been reached")
             if now-last_gui>2.5:
-                stop("앱 응답이 없어 중단했습니다")
+                stop("Stopped because the app stopped responding")
                 break
             for _ in range(32):
                 if not pipe.poll(): break
@@ -72,12 +72,12 @@ def supervisor_main(pipe,held_state=None):
                 kind=command.get("type")
                 if kind=="heartbeat": last_gui=now
                 elif kind=="shutdown":
-                    stop("앱 종료")
+                    stop("App closed")
                     return
-                elif kind=="stop": stop("중단했습니다")
+                elif kind=="stop": stop("Stopped")
                 elif kind=="hotkeys":
                     if worker:
-                        send({"type":"hotkey_error","message":"실행을 중단한 뒤 단축키를 변경하세요."})
+                        send({"type":"hotkey_error","message":"Stop execution before changing hotkeys."})
                         continue
                     try:
                         start,end=monitor.configure(command["start"],command["stop"])
@@ -89,7 +89,7 @@ def supervisor_main(pipe,held_state=None):
                     if worker: continue
                     if command.get("epoch",epoch)!=epoch: continue
                     try:
-                        if not configured: raise ValueError("시작·중단 단축키를 먼저 적용하세요.")
+                        if not configured: raise ValueError("Apply the Start and Stop hotkeys first.")
                         settings=validate_settings(command["settings"])
                         active_backend=settings["backend"]
                         held_state.value=0
@@ -118,7 +118,7 @@ def supervisor_main(pipe,held_state=None):
                         if event["type"] in ("completed","stopped","error"):terminal_event=event
                         else:send(event)
                     dispose()
-                    send(terminal_event or {"type":"error","message":"클릭 엔진이 종료됐습니다."})
+                    send(terminal_event or {"type":"error","message":"The input engine exited unexpectedly."})
                     send({"type":"idle"})
             if now-last_heartbeat>.3:
                 send({"type":"heartbeat"})

@@ -81,7 +81,7 @@ class HardwareTests(unittest.TestCase):
 
     def test_move_fails_if_cursor_cannot_converge(self):
         with patch("arcmouse.hardware.time.sleep"):
-            with self.assertRaisesRegex(OSError,"수렴"):
+            with self.assertRaisesRegex(OSError,"converge"):
                 self.mouse.move(100,100)
         self.assertEqual(len(self.serial.sent),200)
 

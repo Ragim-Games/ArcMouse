@@ -42,7 +42,7 @@ class Button(tk.Canvas):
     def __init__(self, parent, text, command, variant="normal", width=None, height=36, **kwargs):
         self.text, self.command, self.variant = text, command, variant
         self.status, self.hover, self.focused = "normal", False, False
-        self.label_font = tkfont.Font(family="Malgun Gothic", size=9, weight="bold" if variant=="primary" else "normal")
+        self.label_font = tkfont.Font(family="Segoe UI", size=9, weight="bold" if variant=="primary" else "normal")
         width = width or self.label_font.measure(text)+28
         super().__init__(parent, width=width, height=height, bg=parent.cget("bg"),
                          highlightthickness=0, bd=0, cursor="hand2", takefocus=1, **kwargs)
@@ -107,9 +107,9 @@ class Button(tk.Canvas):
 
 
 class Toggle(tk.Canvas):
-    def __init__(self,parent,variable,text="모의 실행"):
+    def __init__(self,parent,variable,text="Dry run"):
         self.variable,self.text,self.status=variable,text,"normal"
-        self.switch_x=max(86,tkfont.Font(family="Malgun Gothic",size=9).measure(text)+12)
+        self.switch_x=max(86,tkfont.Font(family="Segoe UI",size=9).measure(text)+12)
         super().__init__(parent,width=self.switch_x+44,height=34,bg=parent.cget("bg"),bd=0,
                          highlightthickness=0,cursor="hand2",takefocus=1)
         self.trace=variable.trace_add("write",lambda *_:self.redraw())
@@ -135,7 +135,7 @@ class Toggle(tk.Canvas):
     def redraw(self,focused=False):
         self.delete("all")
         active=self.variable.get()
-        self.create_text(0,17,text=self.text,anchor="w",fill=MUTED if self.status=="disabled" else INK,font=("Malgun Gothic",9))
+        self.create_text(0,17,text=self.text,anchor="w",fill=MUTED if self.status=="disabled" else INK,font=("Segoe UI",9))
         rounded(self,self.switch_x,7,self.switch_x+38,27,10,fill=("#36b990" if active else "#c7d0da"),outline=GREEN if focused else "")
         x=self.switch_x+(26 if active else 12)
         self.create_oval(x-8,9,x+8,25,fill=WHITE,outline="")
