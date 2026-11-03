@@ -1,0 +1,2 @@
+# Optional: Windows SendInput mode has no third-party runtime dependencies.
+pyserial==3.5

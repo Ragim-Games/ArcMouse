@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "name": "첫 번째 워크플로",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "x": 60,
+      "y": 70,
+      "params": {},
+      "edges": {
+        "next": "init"
+      }
+    },
+    {
+      "id": "init",
+      "type": "set",
+      "x": 60,
+      "y": 190,
+      "params": {
+        "name": "counter",
+        "value": "0"
+      },
+      "edges": {
+        "next": "loop"
+      }
+    },
+    {
+      "id": "loop",
+      "type": "repeat",
+      "x": 60,
+      "y": 310,
+      "params": {
+        "count": "5"
+      },
+      "edges": {
+        "body": "move",
+        "done": "end"
+      }
+    },
+    {
+      "id": "move",
+      "type": "move",
+      "x": 340,
+      "y": 70,
+      "params": {
+        "x": "240",
+        "y": "180",
+        "duration_ms": 350,
+        "noise_px": 0
+      },
+      "edges": {
+        "next": "click"
+      }
+    },
+    {
+      "id": "click",
+      "type": "click",
+      "x": 340,
+      "y": 190,
+      "params": {
+        "button": "left",
+        "interval_ms": 150,
+        "jitter_ms": 12
+      },
+      "edges": {
+        "next": "increment"
+      }
+    },
+    {
+      "id": "increment",
+      "type": "set",
+      "x": 340,
+      "y": 310,
+      "params": {
+        "name": "counter",
+        "value": "counter + 1"
+      },
+      "edges": {
+        "next": "wait"
+      }
+    },
+    {
+      "id": "wait",
+      "type": "wait",
+      "x": 340,
+      "y": 430,
+      "params": {
+        "ms": 500
+      },
+      "edges": {
+        "next": "loop"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "x": 60,
+      "y": 510,
+      "params": {},
+      "edges": {}
+    }
+  ]
+}
